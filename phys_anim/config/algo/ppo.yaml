@@ -83,7 +83,7 @@ algo:
     eval_metrics_every: 500
     eval_metric_keys: [ ]
     training_early_termination: null
-    num_games: null
+    num_games: null # null for Train, 1 for Eval
     manual_save_every: 10
     use_rand_action_masks: False
     obs_clamp_value: null

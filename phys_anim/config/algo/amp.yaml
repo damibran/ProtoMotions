@@ -19,6 +19,9 @@ algo:
         obs_clamp_value: ${algo.config.obs_clamp_value}
         use_layer_norm: False
         extra_inputs: null
+          #actions:
+          #    retrieve_from_env: True
+          #    dtype: float
 
     discriminator_optimizer:
       _target_: torch.optim.Adam

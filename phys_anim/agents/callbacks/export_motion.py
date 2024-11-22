@@ -64,8 +64,10 @@ class ExportMotion(RL_EvalCallback):
         for idx in range(self.env.num_envs):
             trajectory_data = self.env.motion_recording
 
-            save_dir = self.record_dir / f"{(idx + self.config.index_offset):03d}"
+            save_dir = self.record_dir / f"{(idx):03d}"#+ self.config.index_offset
             save_dir.mkdir(exist_ok=True, parents=True)
+
+            motion_name = self.env.motion_lib.state.motion_files[0].rsplit('/')[-1].split('.')[0]
 
             if self.config.store_poselib:
                 skeleton_tree = self.env.motion_lib.state.motions[0].skeleton_tree
@@ -82,20 +84,27 @@ class ExportMotion(RL_EvalCallback):
                 )
                 sk_motion = SkeletonMotion.from_skeleton_state(sk_state, fps=fps)
 
-                sk_motion.to_file(str(save_dir / f"trajectory_poselib_{idx}.npy"))
+                sk_motion.to_file(str(save_dir / f"{motion_name}.npy"))
 
-                if "target_poses" in trajectory_data:
-                    target_poses = torch.tensor(
-                        np.stack(
-                            [
-                                target_pose[idx]
-                                for target_pose in trajectory_data["target_poses"]
-                            ]
-                        )
-                    )
+                #if "target_poses" in trajectory_data:
+                #    target_poses = torch.tensor(
+                #        np.stack(
+                #            [
+                #                target_pose[idx]
+                #                for target_pose in trajectory_data["target_poses"]
+                #            ]
+                #        )
+                #    )
+                #    np.save(
+                #        str(save_dir / f"target_poses_{idx}.npy"),
+                #        target_poses.cpu().numpy(),
+                #    )
+
+                if "actions" in trajectory_data:
+                    actions = torch.tensor(trajectory_data["actions"])
                     np.save(
-                        str(save_dir / f"target_poses_{idx}.npy"),
-                        target_poses.cpu().numpy(),
+                        str(save_dir / f"{motion_name}_actions.npy"),
+                        actions.cpu().numpy()
                     )
 
                 if hasattr(self.env, "object_ids") and self.env.object_ids[idx] >= 0:

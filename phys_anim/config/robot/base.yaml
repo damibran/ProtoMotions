@@ -65,7 +65,9 @@ robot:
     filter_ints: null
 
 motion_lib:
-  _target_: phys_anim.utils.motion_lib.MotionLib
+  #_target_: phys_anim.utils.StateActionLib.StateActionLib
+  #_target_:  phys_anim.utils.motion_lib_h1.H1_MotionLib
+  _target_:  phys_anim.utils.motion_lib.MotionLib
   motion_file: ${motion_file}
   ref_height_adjust: 0.
   fix_motion_heights: True

@@ -33,6 +33,7 @@ import easydict
 import numpy as np
 from isaacgym import gymapi, gymtorch, gymutil  # type: ignore[misc]
 import torch
+from skimage.data import human_mitosis
 from torch import Tensor
 from hydra.utils import instantiate
 from easydict import EasyDict
@@ -40,7 +41,7 @@ from rich.progress import Progress
 
 from isaac_utils import rotations, torch_utils
 from phys_anim.envs.humanoid.common import BaseHumanoid
-from phys_anim.envs.humanoid.humanoid_utils import build_pd_action_offset_scale
+from phys_anim.envs.humanoid.humanoid_utils import build_pd_action_offset_scale, joint_dof_pos_to_vel
 from phys_anim.envs.base_interface.isaacgym import GymBaseInterface
 from phys_anim.utils.file_utils import load_yaml
 from phys_anim.utils.motion_lib import MotionLib
@@ -127,6 +128,10 @@ class Humanoid(BaseHumanoid, GymBaseInterface):  # type: ignore[misc]
 
         self.initial_dof_pos = self.dof_pos.clone()
         self.initial_dof_vel = self.dof_vel.clone()
+
+        if self.config.get('action_as_dof', False):
+            self.actions = torch.zeros_like(self.initial_dof_pos, device=self.device, dtype=torch.float32)
+            self.prev_action = torch.zeros_like(self.initial_dof_pos, device=self.device, dtype=torch.float32)
 
         if self.total_num_objects == 0:
             self.rigid_body_state: Tensor = gymtorch.wrap_tensor(rigid_body_state)
@@ -1006,13 +1011,23 @@ class Humanoid(BaseHumanoid, GymBaseInterface):  # type: ignore[misc]
         return self.dof_force_tensor
 
     def get_dof_state(self):
-        return self.dof_pos.clone(), self.dof_vel.clone()
+        if self.config.get('action_as_dof', False):
+            dofs = self.action_to_pd_targets(self.actions)
+            dof_pos_t = torch.stack((self.prev_action, dofs), dim=1)
+            dof_vel = joint_dof_pos_to_vel(dof_pos_t, self.dof_offsets, self.dt, self.w_last)
+            dof_vel = dof_vel[:,1,:].squeeze(1)
+            self.prev_action = dofs.clone()
+            return dofs, dof_vel
+        else:
+            return self.dof_pos.clone(), self.dof_vel.clone()
 
     ###############################################################
     # Environment step logic
     ###############################################################
     def apply_pd_control(self):
         pd_tar = self.action_to_pd_targets(self.actions)
+        #print(f"actions: {self.actions}")
+        #print(f"pd_tar: {pd_tar}")
         pd_tar_tensor = gymtorch.unwrap_tensor(pd_tar)
         self.gym.set_dof_position_target_tensor(self.sim, pd_tar_tensor)
 

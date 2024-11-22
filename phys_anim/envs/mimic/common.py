@@ -731,6 +731,12 @@ class BaseMimic(MimicHumanoid):  # type: ignore[misc]
 
         self.motion_recording["target_poses"].append(target_pos.cpu().numpy())
 
+        if self.config.get("export_action", False):
+            if "actions" not in self.motion_recording:
+                self.motion_recording["actions"] = []
+            self.motion_recording["actions"].append(self.actions.cpu().numpy())
+
+
     def process_kb(self, gt: Tensor, gr: Tensor):
         kb = gt[:, self.key_body_ids]
 

@@ -7,5 +7,6 @@ defaults:
 env:
   config:
     state_init: Random
+    action_as_dof: True
 
 experiment_name: ase

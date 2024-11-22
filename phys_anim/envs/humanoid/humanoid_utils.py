@@ -73,6 +73,38 @@ def dof_to_obs(
 
     return dof_obs
 
+#@torch.jit.script
+def joint_dof_pos_to_vel(joint_dofs: torch.Tensor, dof_offsets: List[int], dt: float, w_last : bool) -> torch.Tensor:
+
+    num_frames = joint_dofs.shape[-2]
+    dof_vel = torch.zeros_like(joint_dofs)
+
+    num_joints = len(dof_offsets) - 1
+    for j in range(num_joints):
+        dof_offset = dof_offsets[j]
+        dof_size = dof_offsets[j + 1] - dof_offsets[j]
+        joint_pose = joint_dofs[...,:, dof_offset: (dof_offset + dof_size)]
+        for i in range(num_frames - 1):
+            if dof_size == 3:
+                joint_pose_q0 = torch_utils.exp_map_to_quat(joint_pose[...,i, :], w_last)
+                joint_pose_q1 = torch_utils.exp_map_to_quat(joint_pose[...,i+1, :], w_last)
+
+                diff_quat_data = rotations.quat_mul_norm(torch_utils.quat_inverse(joint_pose_q0), joint_pose_q1, w_last)
+                diff_angle, diff_axis = rotations.quat_angle_axis(diff_quat_data, w_last)
+                dof_vel[...,i, dof_offset: (dof_offset + dof_size)] = diff_axis * diff_angle.unsqueeze(-1) / dt
+
+            elif dof_size == 1:
+                axis = torch.tensor([0.0, 1.0, 0.0], dtype=joint_pose.dtype, device=joint_pose.device)
+                joint_pose_q0 = rotations.quat_from_angle_axis(joint_pose[...,i, :], axis, w_last)
+                joint_pose_q1 = rotations.quat_from_angle_axis(joint_pose[...,i+1, :], axis, w_last)
+
+                diff_quat_data = rotations.quat_mul_norm(torch_utils.quat_inverse(joint_pose_q0), joint_pose_q1, w_last)
+                diff_angle, diff_axis = rotations.quat_angle_axis(diff_quat_data, w_last)
+                dof_vel[...,i, dof_offset: (dof_offset + dof_size)] = (diff_axis * diff_angle.unsqueeze(-1) / dt)[...,1]
+
+    dof_vel[...,-1,:] = dof_vel[...,-2,:]
+
+    return dof_vel
 
 @torch.jit.script
 def compute_humanoid_reward(obs_buf: Tensor) -> Tensor:

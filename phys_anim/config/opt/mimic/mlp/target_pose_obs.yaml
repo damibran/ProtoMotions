@@ -15,7 +15,7 @@ algo:
       config:
         mu_model:
           config:
-            units: [1024, 1024, 1024]
+            units: [512, 512, 512, 512, 512, 512]
             extra_inputs:
               mimic_target_poses: ${algo.config.models.mimic_target_pose_model}
 

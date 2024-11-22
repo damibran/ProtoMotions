@@ -581,6 +581,7 @@ class MotionLib(DeviceDtypeModuleMixin):
             dof_pos = (1.0 - blend) * self.dof_pos[f0l] + blend * self.dof_pos[f1l]
         else:
             dof_pos: Tensor = self._local_rotation_to_dof(local_rot, joint_3d_format)
+            # dof aka action is gathered from local rotation !!! in my case it should be in state-action dataset
 
         root_vel = (1.0 - blend) * root_vel0 + blend * root_vel1
         root_ang_vel = (1.0 - blend) * root_ang_vel0 + blend * root_ang_vel1
@@ -680,6 +681,7 @@ class MotionLib(DeviceDtypeModuleMixin):
             motion_dt.append(curr_dt)
             motion_num_frames.append(num_frames)
 
+            #shape (num_frames,dof_num)
             curr_dof_vels = self._compute_motion_dof_vels(curr_motion)
             curr_motion.dof_vels = curr_dof_vels
 

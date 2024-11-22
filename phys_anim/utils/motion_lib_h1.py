@@ -78,7 +78,18 @@ class H1_MotionLib(MotionLib):
 
     @staticmethod
     def _load_motion_file(motion_file):
-        motion = EasyDict(torch.load(motion_file))
+        #'global_velocity OK
+        #'global_angular_velocity'OK
+        #'global_translation' OK
+        #'global_rotation_mat NU
+        #'global_rotation' OK
+        #'global_root_velocity' OK
+        #'global_root_angular_velocity' OK
+        #'dof_pos' ADD
+        #'local_rotation' OK
+        #'dof_vels' DONT Want
+        t = torch.load(motion_file)
+        motion = EasyDict(t)
         return motion
 
     def _compute_motion_dof_vels(self, motion):

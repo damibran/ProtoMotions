@@ -31,7 +31,7 @@ from torch import Tensor
 import numpy as np
 from isaac_utils.rotations import quat_rotate, quat_from_angle_axis, normalize_angle
 from typing import Tuple
-
+from poselib.core.rotation3d import quat_angle_axis, quat_inverse, quat_mul_norm
 
 @torch.jit.script
 def quat_to_angle_axis(q: Tensor, w_last: bool = False) -> Tuple[Tensor, Tensor]:

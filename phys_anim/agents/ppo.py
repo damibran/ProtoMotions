@@ -886,7 +886,7 @@ class PPO:
 
         log_dict.update(training_log_dict)
 
-        self.fabric.log_dict(log_dict)
+        self.fabric.log_dict(log_dict,step=self.step_count)
 
     def create_actor_args(self, actor_state):
         actor_args = {"obs": actor_state["obs"]}
@@ -984,7 +984,7 @@ class PPO:
     def create_eval_callbacks(self):
         if self.config.eval_callbacks is not None:
             for cb in self.config.eval_callbacks:
-                self.eval_callbacks.append(instantiate(cb, training_loop=self))
+                self.eval_callbacks.append(instantiate(self.config.eval_callbacks[cb], training_loop=self))
 
     def eval(self):
         self.actor.eval()

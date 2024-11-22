@@ -4,4 +4,8 @@ defaults:
   - /algo: amp
   - /env: amp
 
+env:
+  config:
+    action_as_dof: True
+
 experiment_name: amp

@@ -7,9 +7,10 @@ algo:
         _target_: phys_anim.agents.callbacks.export_motion.ExportMotion
         config:
           record_dir: output/recordings
-          store_poselib: False
+          store_poselib: True
           index_offset: ${env.config.motion_index_offset}
 
 env:
   config:
     export_motion: True
+    export_action: True
