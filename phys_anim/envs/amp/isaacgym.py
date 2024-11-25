@@ -27,11 +27,150 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import torch
+from torch import Tensor
 
 from phys_anim.envs.amp.common import BaseDisc
 from phys_anim.envs.humanoid.isaacgym import Humanoid
+from phys_anim.envs.humanoid.humanoid_utils import build_disc_action_observations
 
 
 class DiscHumanoid(BaseDisc, Humanoid):  # type: ignore[misc]
     def __init__(self, config, device: torch.device):
         super().__init__(config, device)
+
+class DiscActionHumanoid(DiscHumanoid):  # type: ignore[misc]
+    def __init__(self, config, device: torch.device):
+        super().__init__(config, device)
+        self.actions = torch.zeros_like(self.dof_pos,device=self.device, dtype=torch.float32)
+
+    def reset_disc_hist_ref(self, env_ids, motion_ids, motion_times):
+        dt = self.dt
+        motion_ids = torch.tile(
+            motion_ids.unsqueeze(-1), [1, self.discriminator_obs_historical_steps - 1]
+        )
+        motion_times = motion_times.unsqueeze(-1)
+        time_steps = -dt * (
+            torch.arange(
+                0, self.discriminator_obs_historical_steps - 1, device=self.device
+            )
+            + 1
+        )
+        motion_times = motion_times + time_steps
+
+        motion_ids = motion_ids.view(-1)
+        motion_times = motion_times.view(-1)
+
+        ref_state = self.motion_lib.get_motion_state(motion_ids, motion_times)
+
+        disc_obs_demo = build_disc_action_observations(
+            ref_state.root_pos,
+            ref_state.root_rot,
+            ref_state.root_vel,
+            ref_state.root_ang_vel,
+            ref_state.dof_pos,
+            ref_state.dof_vel,
+            ref_state.key_body_pos,
+            torch.zeros(len(motion_ids), 1, device=self.device),
+            ref_state.action,
+            self.config.humanoid_obs.local_root_obs,
+            self.config.humanoid_obs.root_height_obs,
+            self.dof_obs_size,
+            self.get_dof_offsets(),
+            False,
+            self.w_last,
+        )
+        self.disc_hist_buf.set_hist(
+            disc_obs_demo.view(
+                len(env_ids), self.discriminator_obs_historical_steps - 1, -1
+            ).permute(1, 0, 2),
+            env_ids,
+        )
+
+    def build_disc_obs_demo(self, motion_ids: Tensor, motion_times0: Tensor):
+        dt = self.dt
+
+        motion_ids = torch.tile(
+            motion_ids.unsqueeze(-1), [1, self.discriminator_obs_historical_steps]
+        )
+        motion_times = motion_times0.unsqueeze(-1)
+        time_steps = -dt * torch.arange(
+            0, self.discriminator_obs_historical_steps, device=self.device
+        )
+        motion_times = motion_times + time_steps
+
+        motion_ids = motion_ids.view(-1)
+        motion_times = motion_times.view(-1)
+
+        # motion ids above are "sub_motions" so first we map to motion file itself and then extract the length.
+        lengths = self.motion_lib.state.motion_lengths[
+            self.motion_lib.state.sub_motion_to_motion[motion_ids]
+        ]
+
+        assert torch.all(motion_times >= 0)
+        assert torch.all(motion_times <= lengths)
+
+        ref_state = self.motion_lib.get_motion_state(motion_ids, motion_times)
+
+        disc_obs_demo = build_disc_action_observations(
+            ref_state.root_pos,
+            ref_state.root_rot,
+            ref_state.root_vel,
+            ref_state.root_ang_vel,
+            ref_state.dof_pos,
+            ref_state.dof_vel,
+            ref_state.key_body_pos,
+            torch.zeros(len(motion_ids), 1, device=self.device),
+            ref_state.action,
+            self.config.humanoid_obs.local_root_obs,
+            self.config.humanoid_obs.root_height_obs,
+            self.dof_obs_size,
+            self.get_dof_offsets(),
+            False,
+            self.w_last,
+        )
+        return disc_obs_demo
+
+    def compute_disc_observations(self, env_ids=None):
+        current_state = self.get_bodies_state()
+
+        dof_pos, dof_vel = self.get_dof_state()
+        key_body_pos = current_state.body_pos[:, self.key_body_ids, :]
+
+        if env_ids is None:
+            disc_obs = build_disc_action_observations(
+                current_state.body_pos[:, 0, :],
+                current_state.body_rot[:, 0, :],
+                current_state.body_vel[:, 0, :],
+                current_state.body_ang_vel[:, 0, :],
+                dof_pos,
+                dof_vel,
+                key_body_pos,
+                self.get_ground_heights(current_state.body_pos[:, 0, :2]),
+                self.actions,
+                self.config.humanoid_obs.local_root_obs,
+                self.config.humanoid_obs.root_height_obs,
+                self.dof_obs_size,
+                self.get_dof_offsets(),
+                False,
+                self.w_last,
+            )
+            self.disc_hist_buf.set_curr(disc_obs)
+        else:
+            disc_obs = build_disc_action_observations(
+                current_state.body_pos[env_ids, 0, :],
+                current_state.body_rot[env_ids, 0, :],
+                current_state.body_vel[env_ids, 0, :],
+                current_state.body_ang_vel[env_ids, 0, :],
+                dof_pos[env_ids],
+                dof_vel[env_ids],
+                key_body_pos[env_ids],
+                self.get_ground_heights(current_state.body_pos[:, 0, :2])[env_ids],
+                self.actions[env_ids],
+                self.config.humanoid_obs.local_root_obs,
+                self.config.humanoid_obs.root_height_obs,
+                self.dof_obs_size,
+                self.get_dof_offsets(),
+                False,
+                self.w_last,
+            )
+            self.disc_hist_buf.set_curr(disc_obs, env_ids)

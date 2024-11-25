@@ -22,7 +22,7 @@ env:
 
     ### Respawn related params
     mimic_motion_sampling:
-      init_start_prob: 0.2
+      init_start_prob: 1
       init_random_prob: 0
 
     mimic_early_termination: null

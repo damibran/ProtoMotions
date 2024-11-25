@@ -1,0 +1,9 @@
+motions:
+  - file: "RL_Avatar_Atk_ShieldSwipe02_Motion.npy"
+    weight: 0.00724638
+  - file: "RL_Avatar_Idle_Ready_Motion.npy"
+    weight: 0.00724638
+  - file: "RL_Avatar_Sword_ParryCrouch_Motion.npy"
+    weight: 0.00724638
+  - file: "RL_Avatar_Sword_ParryLeft_Motion.npy"
+    weight: 0.00724638
