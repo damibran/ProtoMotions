@@ -1,0 +1,12 @@
+# @package _global_
+
+defaults:
+  - /algo: infomax
+  - /env: amp_actions
+
+env:
+  config:
+    state_init: Random
+    action_as_dof: True
+
+experiment_name: ase
