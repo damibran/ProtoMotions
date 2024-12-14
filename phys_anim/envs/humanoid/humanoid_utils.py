@@ -433,7 +433,7 @@ def build_disc_observations(
 
         return obs, obs_dict
 
-#@torch.jit.script
+@torch.jit.script
 def build_disc_action_observations(
     root_pos: Tensor,
     root_rot: Tensor,
@@ -451,24 +451,66 @@ def build_disc_action_observations(
     return_dict: bool,
     w_last: bool,
 ) -> Union[Tensor, Tuple[Tensor, Dict[str, Tensor]]]:
-    res_obs = build_disc_observations(root_pos,
-                                  root_rot,
-                                  root_vel,
-                                  root_ang_vel,
-                                  dof_pos,
-                                  dof_vel,
-                                  key_body_pos,
-                                  ground_height,
-                                  local_root_obs,
-                                  root_height_obs,
-                                  dof_obs_size,
-                                  dof_offsets,
-                                  return_dict,
-                                  w_last)
+    root_h = root_pos[:, 2:3]
+    heading_rot = torch_utils.calc_heading_quat_inv(root_rot, w_last)
 
-    res_dict={}
-    if return_dict:
-        res_obs, res_dict = res_obs
+    if local_root_obs:
+        root_rot_obs = rotations.quat_mul(heading_rot, root_rot, w_last)
+    else:
+        root_rot_obs = root_rot
+    root_rot_obs = torch_utils.quat_to_tan_norm(root_rot_obs, w_last)
+
+    if not root_height_obs:
+        root_h_obs = torch.zeros_like(root_h)
+    else:
+        root_h_obs = root_h - ground_height
+
+    local_root_vel = torch_utils.quat_rotate(heading_rot, root_vel, w_last)
+    local_root_ang_vel = torch_utils.quat_rotate(heading_rot, root_ang_vel, w_last)
+
+    root_pos_expand = root_pos.unsqueeze(-2)
+    local_key_body_pos = key_body_pos - root_pos_expand
+
+    heading_rot_expand = heading_rot.unsqueeze(-2)
+    heading_rot_expand = heading_rot_expand.repeat((1, local_key_body_pos.shape[1], 1))
+    flat_end_pos = local_key_body_pos.view(
+        local_key_body_pos.shape[0] * local_key_body_pos.shape[1],
+        local_key_body_pos.shape[2],
+    )
+    flat_heading_rot = heading_rot_expand.view(
+        heading_rot_expand.shape[0] * heading_rot_expand.shape[1],
+        heading_rot_expand.shape[2],
+    )
+    local_end_pos = torch_utils.quat_rotate(flat_heading_rot, flat_end_pos, w_last)
+    flat_local_key_pos = local_end_pos.view(
+        local_key_body_pos.shape[0],
+        local_key_body_pos.shape[1] * local_key_body_pos.shape[2],
+    )
+
+    dof_obs = dof_to_obs(dof_pos, dof_obs_size, dof_offsets, w_last)
+
+    res_obs = torch.cat(
+        (
+            root_h_obs,
+            root_rot_obs,
+            local_root_vel,
+            local_root_ang_vel,
+            dof_obs,
+            dof_vel,
+            flat_local_key_pos,
+        ),
+        dim=-1,
+    )
+
+    res_dict = {
+        "root_h": root_h,
+        "root_rot": root_rot_obs,
+        "root_vel": local_root_vel,
+        "root_ang_vel": local_root_ang_vel,
+        "dof_obs": dof_obs,
+        "dof_vel": dof_vel,
+        "key_pos": flat_local_key_pos,
+    }
 
     action_obs = dof_to_obs(actions, dof_obs_size, dof_offsets, w_last)
 

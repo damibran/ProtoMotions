@@ -5,3 +5,6 @@ results/
 motion_dataset_learning/old_results/
 motion_dataset_learning/result_state_action/
 phys_anim/data/motions/
+outputs
+py_log.log
+

@@ -1,9 +1,9 @@
 patience: 50
 min_delta: 0.002
 python_path: /home/damibran/anaconda3/envs/ProtoMotionsEnv/bin/python
-train_script: /home/damibran/dev/repos/ProtoMotions/phys_anim/train_agent.py
-learned_models_root: /home/damibran/dev/repos/ProtoMotions/motion_dataset_learning/results
-log_dir: /home/damibran/dev/repos/ProtoMotions/results/h1_full_body_tracker/lightning_logs/version_0
-motions_root: /home/damibran/dev/repos/ProtoMotions/phys_anim/data/motions/sword_shield
-initial_motion: /home/damibran/dev/repos/ProtoMotions/phys_anim/data/motions/sword_shield/amp_sword_and_shield_humanoid_walk.npy
-one_model_max_train_time_minutes: 120
+train_script: /home/damibran/dev/repos/ProtoMotionsFork/phys_anim/train_agent.py
+learned_models_root: /home/damibran/dev/repos/ProtoMotionsFork/motion_dataset_learning/results
+log_dir: /home/damibran/dev/repos/ProtoMotionsFork/results/full_body_tracker/lightning_logs/version_0
+motions_root: /home/damibran/dev/repos/ProtoMotionsFork/phys_anim/data/motions/sword_shield
+initial_motion: /home/damibran/dev/repos/ProtoMotionsFork/phys_anim/data/motions/sword_shield/amp_sword_and_shield_humanoid_walk.npy
+one_model_max_train_time_minutes: 180

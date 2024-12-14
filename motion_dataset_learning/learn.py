@@ -38,7 +38,7 @@ while len(nonlearned_motions) > 0:
     motion_file = config['motions_root'] + '/' + motion_name + '.npy'
     train_script = config['train_script']
     python_path = config['python_path']
-    cmd = f'{python_path} {train_script} +exp=h1_full_body_tracker +backbone=isaacgym +robot=sword_and_shield motion_file={motion_file} num_envs=512'
+    cmd = f'{python_path} {train_script} +exp=full_body_tracker +robot=sword_and_shield +backbone=isaacgym motion_file={motion_file} num_envs=512'
 
     # run
     train_process = subprocess.Popen(cmd, shell=True)
@@ -62,10 +62,6 @@ while len(nonlearned_motions) > 0:
         mean_on_patience = np.mean(rewards[:-config['patience']])
         std_on_patience = np.std(rewards[-config['patience']:])
 
-        #early_stopping.reset()
-        #for reward in rewards_events[-config['patience'] - 1:]:
-        #    early_stopping(reward.value)
-
         if time.time() - start_time >= 60 * config['one_model_max_train_time_minutes']:
             logging.info(f'Early stop by train time. best: {best}, std_on_patience: {std_on_patience}, mean_on_patience: {mean_on_patience}')
             kill_all(train_process.pid)
@@ -77,7 +73,7 @@ while len(nonlearned_motions) > 0:
             break
 
     # move rename
-    shutil.move('/home/damibran/dev/repos/ProtoMotions/results/h1_full_body_tracker/lightning_logs/version_0', config['learned_models_root'])
+    shutil.move('/home/damibran/dev/repos/ProtoMotionsFork/results/full_body_tracker/lightning_logs/version_0', config['learned_models_root'])
     os.rename(config['learned_models_root']+'/'+'version_0', config['learned_models_root'] +'/'+ motion_name)
 
     # iterate

@@ -1,6 +1,6 @@
-
 from typing import List, Tuple, Dict
 import torch
+from torch import nn as nn
 from torch import Tensor
 from isaac_utils import torch_utils
 from lightning.fabric import Fabric
@@ -11,6 +11,12 @@ from phys_anim.agents.models.common import NormObsBase
 from phys_anim.envs.env_utils.general import StepTracker
 from phys_anim.agents.models.infomax import JointDiscWithMutualInformationEncMLP
 from phys_anim.envs.humanoid.humanoid_utils import build_disc_action_observations, compute_humanoid_observations_max
+import math
+
+
+def list_roll(inlist, n):
+    for i in range(n):
+        inlist.append(inlist.pop(0))
 
 class IQL:
 
@@ -47,20 +53,76 @@ class IQL:
         self.setup_character_props()
 
         self.key_body_ids = torch.tensor(
-        [
-            self.all_config.robot.dfs_body_names.index(key_body_name)
-            for key_body_name in self.all_config.robot.key_bodies
-        ],
-        dtype=torch.long,
-    )
+            [
+                self.all_config.robot.dfs_body_names.index(key_body_name)
+                for key_body_name in self.all_config.robot.key_bodies
+            ],
+            dtype=torch.long,
+        )
 
-        self.motion_lib :  StateActionLib = StateActionLib(
+        self.motion_lib: StateActionLib = StateActionLib(
             motion_file=config.motion_file,
-            dof_body_ids = self.dof_body_ids,
-            dof_offsets = self.dof_offsets,
-            key_body_ids = self.key_body_ids,
+            dof_body_ids=self.dof_body_ids,
+            dof_offsets=self.dof_offsets,
+            key_body_ids=self.key_body_ids,
             device=self.device,
         )
+
+        state_action = []
+        for motion_id in range(len(self.motion_lib.state.motions)):
+            motion = self.motion_lib.get_motion(motion_id)
+            motion_time = torch.zeros(1, device=self.device)
+            while motion_time < self.motion_lib.get_motion_length(motion_id):
+                motion_time += motion.time_delta
+                state_action.append(self.motion_lib.get_motion_state(motion_id, motion_time))
+
+        self.dataset_len = len(state_action)
+
+        self.dataset = {
+            "StateAction" : [],
+            "DiscrimObs": torch.zeros(len(state_action), self.discriminator_obs_size_per_step, device=self.device),
+            "Actions": torch.zeros(len(state_action), self.num_act, device=self.device),
+            "HumanoidObservations": torch.zeros(len(state_action), self.num_obs, device=self.device)
+        }
+
+        for i in range(len(state_action)):
+            self.dataset["StateAction"].append(state_action[i])
+            self.dataset["DiscrimObs"][i] = build_disc_action_observations(
+                state_action[i].root_pos,
+                state_action[i].root_rot,
+                state_action[i].root_vel,
+                state_action[i].root_ang_vel,
+                state_action[i].dof_pos,
+                state_action[i].dof_vel,
+                state_action[i].key_body_pos,
+                torch.zeros(1, device=self.device),
+                state_action[i].action,
+                self.all_config.env.config.humanoid_obs.local_root_obs,
+                self.all_config.env.config.humanoid_obs.root_height_obs,
+                self.all_config.robot.dof_obs_size,
+                self.dof_offsets,
+                False,
+                self.w_last,
+            )
+            self.dataset["HumanoidObservations"][i] = compute_humanoid_observations_max(
+                state_action[i].rb_pos,
+                state_action[i].rb_rot,
+                state_action[i].rb_vel,
+                state_action[i].rb_ang_vel,
+                torch.zeros(1, device=self.device),
+                self.all_config.env.config.humanoid_obs.local_root_obs,
+                self.all_config.env.config.humanoid_obs.root_height_obs,
+                self.w_last,
+            )
+            self.dataset["Actions"][i] = state_action[i].action
+
+        self.latent_samples_per_batch = 10
+
+        test_list = [1,2,3,4]
+        list_roll(test_list, 2)
+        assert (test_list == [3,4,1,2])
+
+        pass
 
 
     def setup(self):
@@ -95,9 +157,10 @@ class IQL:
             params=list(critic_sa.parameters()),
         )
         self.critic_sa, self.critic_sa_optimizer = self.fabric.setup(critic_sa, critic_sa_optimizer)
+        self.critic_sa_criterion = nn.MSELoss()
 
         target_critic: NormObsBase = instantiate(
-            self.config.critic_sa, num_in=self.num_obs , num_out=1
+            self.config.critic_sa, num_in=self.num_obs, num_out=1
         )
 
         self.target_critic = self.fabric.setup(target_critic)
@@ -117,114 +180,196 @@ class IQL:
         )
 
     def fit(self):
-        while self.current_epoch < self.config.max_epochs:
+        for self.current_epoch in range(self.config.max_epochs):
             print(f"Epoch: {self.current_epoch}")
-            batch = self.collectExpertData()
-            '''
-            batch = 
-            {
-                "latents": (self.config.batch_size,sum(self.config.infomax_parameters.latent_dim))
-                "StateAction": List[MotionStateAction]
-                "reward": (self.config.batch_size, 1)
-                "DiscrimObs" : torch.zeros(self.config.batch_size, self.discriminator_obs_size_per_step, device=self.device),
-                "HumanoidObservations" : torch.zeros(self.config.batch_size, self.num_obs, device=self.device)
-            }
-            '''
-            self.log_dict.update({"reward": batch["reward"].mean().detach()})
-            demo_actions_tensor = torch.zeros(self.config.batch_size, self.num_act, device=self.device)
-            for i in range(self.config.batch_size):
-                demo_actions_tensor[i] = batch["StateAction"][i].action
+            batch_count = math.ceil(self.dataset_len/self.config.batch_size)
 
-            q_value = self.target_critic({"obs": batch["HumanoidObservations"],"actions": demo_actions_tensor, "latents":batch["latents"]})
-            v_value = self.critic_s({"obs": batch["HumanoidObservations"],"latents":batch["latents"]})
+            v_loss_tensor = torch.zeros(self.latent_samples_per_batch * batch_count)
+            q_loss_tensor = torch.zeros(self.latent_samples_per_batch * batch_count)
 
-            q_v_diff = q_value - v_value
+            desciptor_r = torch.zeros(self.latent_samples_per_batch * batch_count)
+            enc_r = torch.zeros(self.latent_samples_per_batch * batch_count)
+            total_r = torch.zeros(self.latent_samples_per_batch * batch_count)
 
-            value_loss = torch.where(q_v_diff > 0, self.expectile, (1-self.expectile)) * (q_v_diff**2)
+            for batch_id in range(batch_count):
+                self.dataset["DiscrimObs"] = torch.roll(self.dataset["DiscrimObs"], shifts=-self.config.batch_size)
+                self.dataset["HumanoidObservations"] = torch.roll(self.dataset["HumanoidObservations"], shifts=-self.config.batch_size)
+                self.dataset["Actions"] = torch.roll(self.dataset["Actions"], shifts=-self.config.batch_size)
+                list_roll(self.dataset["StateAction"], self.config.batch_size)
 
-            self.log_dict.update({"value_loss":value_loss.mean().detach()})
+                batch = {
+                    "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
+                    "HumanoidObservations":self.dataset["HumanoidObservations"][0:self.config.batch_size],
+                    "Actions":self.dataset["Actions"][0:self.config.batch_size]
+                }
 
-            self.critic_s_optimizer.zero_grad()
-            self.fabric.backward(value_loss.mean())
-            self.critic_s_optimizer.step()
 
-            next_obs = torch.zeros(self.config.batch_size, self.num_obs, device=self.device)
-            next_obs[0:self.config.batch_size-1] = batch["HumanoidObservations"][1:self.config.batch_size]
-            next_obs[self.config.batch_size-1] = batch["HumanoidObservations"][0]
+                for i in range(self.latent_samples_per_batch):
+                    latents = self.sample_latent(self.config.batch_size)
 
-            next_latents = torch.zeros(self.config.batch_size, sum(self.config.infomax_parameters.latent_dim), device=self.device)
-            next_latents[0:self.config.batch_size-1] = batch["latents"][1:self.config.batch_size]
-            next_latents[self.config.batch_size-1] = batch["latents"][0]
+                    desc_r = self.calculate_discriminator_reward(batch["DiscrimObs"]).squeeze()
+                    mi_r = self.calc_mi_reward(batch["DiscrimObs"], latents)
 
-            q_loss = (batch["reward"]
-                      + self.discount * self.critic_s({"obs": next_obs,"latents":next_latents})
-                      - self.critic_sa({"obs": batch["HumanoidObservations"],"actions": demo_actions_tensor, "latents":batch["latents"]}))
+                    reward = desc_r + mi_r + 1
 
-            self.log_dict.update({"q_loss": q_loss.mean().detach()})
+                    desciptor_r[batch_id * self.latent_samples_per_batch + i] = desc_r.mean().detach()
+                    enc_r[batch_id * self.latent_samples_per_batch + i] = mi_r.mean().detach()
+                    total_r[batch_id * self.latent_samples_per_batch + i] = reward.mean().detach()
 
-            self.critic_sa_optimizer.zero_grad()
-            self.fabric.backward(q_loss.mean())
-            self.critic_sa_optimizer.step()
+                    """
+                    VF Loss
+                    """
 
-            for param_cur, param_target in zip(self.critic_sa.parameters(), self.target_critic.parameters()):
-                param_target.data = (1-self.alpha) * param_target.data + self.alpha * param_cur.data
+                    q_pred = self.target_critic(
+                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents": latents}).detach()
+                    vf_pred = self.critic_s({"obs": batch["HumanoidObservations"], "latents": latents})
+                    vf_err = vf_pred - q_pred
+                    vf_sign = (vf_err > 0).float()
+                    vf_weight = (1 - vf_sign) * self.expectile + vf_sign * (1 - self.expectile)
+                    value_loss = (vf_weight * (vf_err ** 2)).mean()
 
-            self.actor.training = True
-            actor_out = self.actor.training_forward({"obs": batch["HumanoidObservations"],"actions": demo_actions_tensor, "latents":batch["latents"]})
+                    v_loss_tensor[batch_id * self.latent_samples_per_batch + i] = value_loss.mean().detach()
 
-            q_val = self.target_critic({"obs": batch["HumanoidObservations"],"actions": demo_actions_tensor, "latents":batch["latents"]})
-            v_val = self.critic_s({"obs": batch["HumanoidObservations"],"latents":batch["latents"]})
+                    """
+                    QF Loss
+                    """
 
-            adv = torch.minimum(torch.exp(self.beta * (q_val-v_val)), torch.tensor(100.0, device=self.device))
+                    next_obs = torch.roll(batch["HumanoidObservations"], shifts=-1, dims=0)
+                    next_latents = torch.roll(latents, shifts=-1, dims=0)
 
-            actor_adw_loss = (adv * actor_out["neglogp"]).mean()
+                    q_target = reward + self.discount * self.critic_s({"obs": next_obs, "latents": next_latents}).detach()
+                    q_target = q_target.detach()
+                    q_pred = self.critic_sa({"obs": batch["HumanoidObservations"], "actions": batch["Actions"],
+                                                "latents": latents})
 
-            actor_div_loss, div_loss_log = self.calculate_extra_actor_loss({"obs": batch["HumanoidObservations"],"actions": demo_actions_tensor,"latents":batch["latents"]})
+                    q_loss = self.critic_sa_criterion(q_target, q_pred)
 
-            actor_loss = actor_adw_loss + actor_div_loss
+                    q_loss_tensor[batch_id * self.latent_samples_per_batch + i] = q_loss.mean().detach()
 
-            self.log_dict.update({"actor_loss": actor_loss.mean().detach()})
+                    """
+                    Step
+                    """
 
-            self.actor_optimizer.zero_grad()
-            self.fabric.backward(actor_loss.mean())
-            self.actor_optimizer.step()
+                    self.critic_s_optimizer.zero_grad()
+                    self.fabric.backward(value_loss.mean())
+                    self.critic_s_optimizer.step()
 
-            self.actor.training = False
-            actor_eval_out = self.actor.eval_forward({"obs": batch["HumanoidObservations"],"latents":batch["latents"]})
+                    self.critic_sa_optimizer.zero_grad()
+                    self.fabric.backward(q_loss.mean())
+                    self.critic_sa_optimizer.step()
 
-            agent_disc_obs = torch.zeros(self.config.batch_size, self.discriminator_obs_size_per_step, device=self.device)
-            for i in range(self.config.batch_size):
-                agent_disc_obs[i] = build_disc_action_observations(
-                    batch["StateAction"][i].root_pos,
-                    batch["StateAction"][i].root_rot,
-                    batch["StateAction"][i].root_vel,
-                    batch["StateAction"][i].root_ang_vel,
-                    batch["StateAction"][i].dof_pos,
-                    batch["StateAction"][i].dof_vel,
-                    batch["StateAction"][i].key_body_pos,
-                    torch.zeros(1, device=self.device),
-                    actor_eval_out["actions"][i].unsqueeze(0),
-                    self.all_config.env.config.humanoid_obs.local_root_obs,
-                    self.all_config.env.config.humanoid_obs.root_height_obs,
-                    self.all_config.robot.dof_obs_size,
-                    self.dof_offsets,
-                    False,
-                    self.w_last,
-                )
+                    for param_cur, param_target in zip(self.critic_sa.parameters(), self.target_critic.parameters()):
+                        param_target.data = (1 - self.alpha) * param_target.data + self.alpha * param_cur.data
 
-            disc_loss , disc_log_dict = self.encoder_step({"AgentDiscObs": agent_disc_obs, "DemoDiscObs":batch["DiscrimObs"], "latents":batch["latents"]})
-            self.log_dict.update(disc_log_dict)
+            self.log_dict.update({
+                "reward/desc":desciptor_r.mean(),
+                "reward/end": enc_r.mean(),
+                "reward/total":total_r.mean()
+            })
+            self.log_dict.update({"ac/v_loss": v_loss_tensor.mean()})
+            self.log_dict.update({"ac/q_loss": q_loss_tensor.mean()})
 
-            self.discriminator_optimizer.zero_grad()
-            self.fabric.backward(disc_loss)
-            self.discriminator_optimizer.step()
+            a_loss_tensor_adw = torch.zeros(self.latent_samples_per_batch * batch_count)
+            a_loss_tensor_div = torch.zeros(self.latent_samples_per_batch * batch_count)
+            a_loss_tensor_total = torch.zeros(self.latent_samples_per_batch * batch_count)
+            for batch_id in range(math.ceil(self.dataset_len/self.config.batch_size)):
+                self.dataset["DiscrimObs"] = torch.roll(self.dataset["DiscrimObs"], shifts=-self.config.batch_size)
+                self.dataset["HumanoidObservations"] = torch.roll(self.dataset["HumanoidObservations"], shifts=-self.config.batch_size)
+                self.dataset["Actions"] = torch.roll(self.dataset["Actions"], shifts=-self.config.batch_size)
+                list_roll(self.dataset["StateAction"], self.config.batch_size)
 
-            self.fabric.log_dict(self.log_dict,self.current_epoch)
+                batch = {
+                    "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
+                    "HumanoidObservations":self.dataset["HumanoidObservations"][0:self.config.batch_size],
+                    "Actions":self.dataset["Actions"][0:self.config.batch_size]
+                }
 
-            self.current_epoch+=1
+                for i in range(self.latent_samples_per_batch):
+                    latents = self.sample_latent(self.config.batch_size)
+
+                    self.actor.training = True
+                    actor_out = self.actor.training_forward(
+                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents": latents})
+
+                    q_val = self.target_critic(
+                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents": latents})
+                    v_val = self.critic_s({"obs": batch["HumanoidObservations"], "latents": latents})
+
+                    adv = q_val - v_val
+                    exp_adv = torch.exp(adv / self.beta)
+                    exp_adv = torch.clamp(exp_adv, max=100)
+
+                    actor_adw_loss = torch.clamp((exp_adv * actor_out["neglogp"]).mean(),max=200)
+
+                    actor_div_loss, div_loss_log = self.calculate_extra_actor_loss(
+                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents": latents})
+
+                    actor_loss = actor_adw_loss + actor_div_loss
+
+                    a_loss_tensor_adw[batch_id * self.latent_samples_per_batch + i] = actor_adw_loss.mean().detach()
+                    a_loss_tensor_div[batch_id * self.latent_samples_per_batch + i] = actor_div_loss.mean().detach()
+                    a_loss_tensor_total[batch_id * self.latent_samples_per_batch + i] = actor_loss.mean().detach()
+
+                    self.actor_optimizer.zero_grad()
+                    self.fabric.backward(actor_loss.mean())
+                    self.actor_optimizer.step()
+
+            self.log_dict.update({"actor_loss/adw": a_loss_tensor_adw.mean()})
+            self.log_dict.update({"actor_loss/div": a_loss_tensor_div.mean()})
+            self.log_dict.update({"actor_loss/total": a_loss_tensor_total.mean()})
+
+            for batch_id in range(math.ceil(self.dataset_len / self.config.batch_size)):
+                self.dataset["DiscrimObs"] = torch.roll(self.dataset["DiscrimObs"], shifts=-self.config.batch_size)
+                self.dataset["HumanoidObservations"] = torch.roll(self.dataset["HumanoidObservations"], shifts=-self.config.batch_size)
+                self.dataset["Actions"] = torch.roll(self.dataset["Actions"], shifts=-self.config.batch_size)
+                list_roll(self.dataset["StateAction"], self.config.batch_size)
+
+                batch = {
+                    "StateAction" : self.dataset["StateAction"][0:self.config.batch_size],
+                    "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
+                    "HumanoidObservations": self.dataset["HumanoidObservations"][0:self.config.batch_size],
+                    "Actions": self.dataset["Actions"][0:self.config.batch_size]
+                }
+
+                for i in range(self.latent_samples_per_batch):
+                    latents = self.sample_latent(self.config.batch_size)
+
+                    self.actor.training = False
+                    actor_eval_out = self.actor.eval_forward(
+                        {"obs": batch["HumanoidObservations"], "latents": latents})
+
+                    agent_disc_obs = torch.zeros(self.config.batch_size, self.discriminator_obs_size_per_step,
+                                                 device=self.device)
+                    for k in range(self.config.batch_size):
+                        agent_disc_obs[k] = build_disc_action_observations(
+                            batch["StateAction"][k].root_pos,
+                            batch["StateAction"][k].root_rot,
+                            batch["StateAction"][k].root_vel,
+                            batch["StateAction"][k].root_ang_vel,
+                            batch["StateAction"][k].dof_pos,
+                            batch["StateAction"][k].dof_vel,
+                            batch["StateAction"][k].key_body_pos,
+                            torch.zeros(1, device=self.device),
+                            actor_eval_out["actions"][k].unsqueeze(0),
+                            self.all_config.env.config.humanoid_obs.local_root_obs,
+                            self.all_config.env.config.humanoid_obs.root_height_obs,
+                            self.all_config.robot.dof_obs_size,
+                            self.dof_offsets,
+                            False,
+                            self.w_last,
+                        )
+
+                    disc_loss, disc_log_dict = self.encoder_step(
+                        {"AgentDiscObs": agent_disc_obs, "DemoDiscObs": batch["DiscrimObs"], "latents": latents})
+                    self.log_dict.update(disc_log_dict)
+
+                    self.discriminator_optimizer.zero_grad()
+                    self.fabric.backward(disc_loss)
+                    self.discriminator_optimizer.step()
+
+            self.fabric.log_dict(self.log_dict, self.current_epoch)
 
             pass
-
 
     def sample_latent(self, n):
         latents = torch.zeros(
@@ -234,23 +379,23 @@ class IQL:
         start = 0
         for idx, dim in enumerate(self.config.infomax_parameters.latent_dim):
             if self.config.infomax_parameters.latent_types[idx] == "gaussian":
-                gaussian_sample = torch.normal(latents[:, start : start + dim])
-                latents[:, start : start + dim] = gaussian_sample
+                gaussian_sample = torch.normal(latents[:, start: start + dim])
+                latents[:, start: start + dim] = gaussian_sample
 
             elif self.config.infomax_parameters.latent_types[idx] == "hypersphere":
-                gaussian_sample = torch.normal(latents[:, start : start + dim])
+                gaussian_sample = torch.normal(latents[:, start: start + dim])
                 projected_gaussian_sample = torch.nn.functional.normalize(
                     gaussian_sample, dim=-1
                 )
-                latents[:, start : start + dim] = projected_gaussian_sample
+                latents[:, start: start + dim] = projected_gaussian_sample
 
             elif self.config.infomax_parameters.latent_types[idx] == "uniform":
                 uniform_sample = torch.rand([n, dim], device=self.device)
-                latents[:, start : start + dim] = uniform_sample
+                latents[:, start: start + dim] = uniform_sample
 
             elif self.config.infomax_parameters.latent_types[idx] == "categorical":
                 categorical_sample = torch.multinomial(
-                    latents[0, start : start + dim] + 1.0,
+                    latents[0, start: start + dim] + 1.0,
                     num_samples=n,
                     replacement=True,
                 )
@@ -326,9 +471,9 @@ class IQL:
         for idx, latent_dim in enumerate(self.config.infomax_parameters.latent_dim):
             if self.config.infomax_parameters.latent_types[idx] == "hypersphere":
                 r = self.von_mises_fisher_reward(
-                    enc_pred[..., cumulative_enc_dim : cumulative_enc_dim + latent_dim],
+                    enc_pred[..., cumulative_enc_dim: cumulative_enc_dim + latent_dim],
                     latents[
-                        ..., cumulative_latent_dim : cumulative_latent_dim + latent_dim
+                    ..., cumulative_latent_dim: cumulative_latent_dim + latent_dim
                     ],
                 )
 
@@ -374,7 +519,7 @@ class IQL:
         for body_name in body_names:
             body_id = self.body_names.index(body_name)
             assert (
-                body_id != -1
+                    body_id != -1
             ), f"Body part {body_name} not found in {self.body_names}"
             body_ids.append(body_id)
 
@@ -390,19 +535,20 @@ class IQL:
 
         prob = 1 / (1 + torch.exp(-disc_logits))
         disc_r = (
-            -torch.log(
-                torch.maximum(1 - prob, torch.tensor(0.0001, device=self.device))
-            )
-            * self.config.discriminator_reward_w
+                -torch.log(
+                    torch.maximum(1 - prob, torch.tensor(0.0001, device=self.device))
+                )
+                * self.config.discriminator_reward_w
         )
         return disc_r
 
     def collectExpertData(self):
-        batch_dict =  {
-            "latents" : torch.zeros((self.config.batch_size,sum(self.config.infomax_parameters.latent_dim)),device=self.device),
-            "StateAction" : [], #List[MotionStateAction]
-            "DiscrimObs" : torch.zeros(self.config.batch_size, self.discriminator_obs_size_per_step, device=self.device),
-            "HumanoidObservations" : torch.zeros(self.config.batch_size, self.num_obs, device=self.device)
+        batch_dict = {
+            "latents": torch.zeros((self.config.batch_size, sum(self.config.infomax_parameters.latent_dim)),
+                                   device=self.device),
+            "StateAction": [],  # List[MotionStateAction]
+            "DiscrimObs": torch.zeros(self.config.batch_size, self.discriminator_obs_size_per_step, device=self.device),
+            "HumanoidObservations": torch.zeros(self.config.batch_size, self.num_obs, device=self.device)
         }
 
         latents = self.sample_latent(self.config.batch_size)
@@ -410,7 +556,7 @@ class IQL:
 
         motion_id = self.motion_lib.sample_motions(1)
         motion = self.motion_lib.get_motion(motion_id)
-        motion_time = torch.zeros(1,device = self.device)
+        motion_time = torch.zeros(1, device=self.device)
         for i in range(self.config.batch_size):
             if motion_time < self.motion_lib.get_motion_length(motion_id):
                 motion_time += motion.time_delta
@@ -418,7 +564,7 @@ class IQL:
             else:
                 motion_id = self.motion_lib.sample_motions(1)
                 motion = self.motion_lib.get_motion(motion_id)
-                motion_time = torch.zeros(1,device = self.device)
+                motion_time = torch.zeros(1, device=self.device)
                 batch_dict["StateAction"].append(self.motion_lib.get_motion_state(motion_id, motion_time))
 
         for i in range(self.config.batch_size):
@@ -430,7 +576,7 @@ class IQL:
                 batch_dict["StateAction"][i].dof_pos,
                 batch_dict["StateAction"][i].dof_vel,
                 batch_dict["StateAction"][i].key_body_pos,
-                torch.zeros(1,device = self.device),
+                torch.zeros(1, device=self.device),
                 batch_dict["StateAction"][i].action,
                 self.all_config.env.config.humanoid_obs.local_root_obs,
                 self.all_config.env.config.humanoid_obs.root_height_obs,
@@ -526,7 +672,7 @@ class IQL:
             logit_total = sum([p.pow(2).sum() for p in logit_params])
 
             logit_weight_decay_loss: Tensor = (
-                logit_total * self.config.discriminator_logit_weight_decay
+                    logit_total * self.config.discriminator_logit_weight_decay
             )
         else:
             logit_weight_decay_loss = torch.tensor(0.0, device=self.device)
@@ -559,7 +705,7 @@ class IQL:
     #   "DemoDiscObs"
     #   "latents"
     # }
-    def encoder_step(self,batch) -> Tuple[Tensor, Dict]:
+    def encoder_step(self, batch) -> Tuple[Tensor, Dict]:
         discriminator_loss, discriminator_log_dict = self.discriminator_step(batch)
 
         obs = batch["AgentDiscObs"]
@@ -577,7 +723,7 @@ class IQL:
             enc_weight_params = self.discriminator.enc_weights()
             total: Tensor = sum([p.pow(2).sum() for p in enc_weight_params])
             weight_decay_loss: Tensor = (
-                total * self.config.infomax_parameters.mi_enc_weight_decay
+                    total * self.config.infomax_parameters.mi_enc_weight_decay
             )
         else:
             weight_decay_loss = torch.tensor(0.0, device=self.device)
