@@ -19,15 +19,15 @@ env:
         pow_rew_w: 0.0005
 
       component_coefficients:
-        gt_rew_c: -100
-        rt_rew_c: -120
-        rv_rew_c: -1
-        rav_rew_c: -0.3
-        gv_rew_c: -0.5
-        gav_rew_c: -0.1
-        kb_rew_c: -100
-        gr_rew_c: -2
-        lr_rew_c: -2
-        dv_rew_c: -0.005
-        rh_rew_c: -100
-        kbf_rew_c: -0.01
+        gt_rew_c: -100 # Global translation (gt)
+        rt_rew_c: -120 # Root translation (rt)
+        rv_rew_c: -1 # Root Velocity
+        rav_rew_c: -0.3 # Root Angular Velocity
+        gv_rew_c: -0.5 # Global Velocity
+        gav_rew_c: -0.1 # Global Angular Velocity
+        kb_rew_c: -100 # Key Bodies
+        gr_rew_c: -2 # Global Rotation
+        lr_rew_c: -2 # Local Rotation
+        dv_rew_c: -0.005 # DOF Velocity
+        rh_rew_c: -100 # Root Height
+        kbf_rew_c: -0.01 # Not Used

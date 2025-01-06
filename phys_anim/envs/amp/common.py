@@ -48,7 +48,7 @@ class BaseDisc(DiscHumanoid):  # type: ignore[misc]
             self.discriminator_obs_historical_steps = (
                 self.config.discriminator_obs_historical_steps
             )
-            assert self.discriminator_obs_historical_steps >= 2
+            #assert self.discriminator_obs_historical_steps >= 2
 
             self.disc_hist_buf = HistoryBuffer(
                 self.discriminator_obs_historical_steps,

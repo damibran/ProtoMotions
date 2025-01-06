@@ -79,12 +79,13 @@ class DiscActionHumanoid(DiscHumanoid):  # type: ignore[misc]
             False,
             self.w_last,
         )
-        self.disc_hist_buf.set_hist(
-            disc_obs_demo.view(
-                len(env_ids), self.discriminator_obs_historical_steps - 1, -1
-            ).permute(1, 0, 2),
-            env_ids,
-        )
+        if self.discriminator_obs_historical_steps >= 2:
+            self.disc_hist_buf.set_hist(
+                disc_obs_demo.view(
+                    len(env_ids), self.discriminator_obs_historical_steps - 1, -1
+                ).permute(1, 0, 2),
+                env_ids,
+            )
 
     def build_disc_obs_demo(self, motion_ids: Tensor, motion_times0: Tensor):
         dt = self.dt

@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import List, Tuple, Dict
 import torch
 from torch import nn as nn
@@ -269,6 +270,9 @@ class IQL:
             self.log_dict.update({"ac/v_loss": v_loss_tensor.mean()})
             self.log_dict.update({"ac/q_loss": q_loss_tensor.mean()})
 
+            a_loss_tensor_adw_exp = torch.zeros(self.latent_samples_per_batch * batch_count)
+            a_loss_tensor_adw_neglog = torch.zeros(self.latent_samples_per_batch * batch_count)
+            a_loss_tensor_adw_b_c = torch.zeros(self.latent_samples_per_batch * batch_count)
             a_loss_tensor_adw = torch.zeros(self.latent_samples_per_batch * batch_count)
             a_loss_tensor_div = torch.zeros(self.latent_samples_per_batch * batch_count)
             a_loss_tensor_total = torch.zeros(self.latent_samples_per_batch * batch_count)
@@ -299,7 +303,13 @@ class IQL:
                     exp_adv = torch.exp(adv / self.beta)
                     exp_adv = torch.clamp(exp_adv, max=100)
 
-                    actor_adw_loss = torch.clamp((exp_adv * actor_out["neglogp"]).mean(),max=200)
+                    actor_adw_loss = (exp_adv * actor_out["neglogp"]).mean()
+
+                    a_loss_tensor_adw_exp[batch_id * self.latent_samples_per_batch + i] = exp_adv.mean().detach()
+                    a_loss_tensor_adw_neglog[batch_id * self.latent_samples_per_batch + i] = actor_out["neglogp"].mean().detach()
+                    a_loss_tensor_adw_b_c[batch_id * self.latent_samples_per_batch + i] = actor_adw_loss.detach()
+
+                    actor_adw_loss = torch.clamp(actor_adw_loss,max=200)
 
                     actor_div_loss, div_loss_log = self.calculate_extra_actor_loss(
                         {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents": latents})
@@ -314,7 +324,10 @@ class IQL:
                     self.fabric.backward(actor_loss.mean())
                     self.actor_optimizer.step()
 
-            self.log_dict.update({"actor_loss/adw": a_loss_tensor_adw.mean()})
+            self.log_dict.update({"actor_loss/adw_exp": a_loss_tensor_adw_exp.mean()})
+            self.log_dict.update({"actor_loss/neg_log": a_loss_tensor_adw_neglog.mean()})
+            self.log_dict.update({"actor_loss/adw_before_clip": a_loss_tensor_adw_b_c.mean()})
+            self.log_dict.update({"actor_loss/adw_after_clip": a_loss_tensor_adw.mean()})
             self.log_dict.update({"actor_loss/div": a_loss_tensor_div.mean()})
             self.log_dict.update({"actor_loss/total": a_loss_tensor_total.mean()})
 
@@ -369,7 +382,8 @@ class IQL:
 
             self.fabric.log_dict(self.log_dict, self.current_epoch)
 
-            pass
+            if self.current_epoch % 10 == 0:
+                self.save()
 
     def sample_latent(self, n):
         latents = torch.zeros(
@@ -777,6 +791,36 @@ class IQL:
             total_error.append(err)
 
         return torch.cat(total_error, dim=-1)
+
+    def get_state_dict(self, state_dict):
+        extra_state_dict = {
+            "actor": self.actor.state_dict(),
+            "critic": self.critic_s.state_dict(),
+            "actor_optimizer": self.actor_optimizer.state_dict(),
+            "critic_optimizer": self.critic_s_optimizer.state_dict(),
+            "epoch": self.current_epoch,
+                "episode_reward_meter": None,
+            "episode_length_meter": None,
+            "best_evaluated_score": 0,
+        }
+
+        state_dict["running_val_norm"] = None
+
+        state_dict["discriminator"] = self.discriminator.state_dict()
+        state_dict["discriminator_optimizer"] = (
+            self.discriminator_optimizer.state_dict()
+        )
+
+        state_dict.update(extra_state_dict)
+        return state_dict
+
+    def save(self, path=None, name="last.ckpt", new_high_score=False):
+        if path is None:
+            path = self.fabric.loggers[0].log_dir
+        root_dir = Path.cwd() / Path(self.fabric.loggers[0].root_dir)
+        save_dir = Path.cwd() / Path(path)
+        state_dict = self.get_state_dict({})
+        self.fabric.save(save_dir / name, state_dict)
 
     @staticmethod
     def disc_loss_neg(disc_logits) -> Tensor:

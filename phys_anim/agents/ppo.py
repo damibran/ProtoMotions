@@ -236,10 +236,14 @@ class PPO:
             self.critic_lr_scheduler.load_state_dict(state_dict["critic_lr_scheduler"])
 
         if self.config.normalize_values:
-            self.running_val_norm.load_state_dict(state_dict["running_val_norm"])
+            if state_dict["running_val_norm"] is not None: # todo: add running_val_norm in offline
+                self.running_val_norm.load_state_dict(state_dict["running_val_norm"])
 
-        self.episode_reward_meter.load_state_dict(state_dict["episode_reward_meter"])
-        self.episode_length_meter.load_state_dict(state_dict["episode_length_meter"])
+        if state_dict["episode_reward_meter"] is not None:
+            self.episode_reward_meter.load_state_dict(state_dict["episode_reward_meter"])
+
+        if state_dict["episode_length_meter"] is not None:
+            self.episode_length_meter.load_state_dict(state_dict["episode_length_meter"])
 
     def fit(self):
         self.env_reset()
