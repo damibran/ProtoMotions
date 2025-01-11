@@ -6,13 +6,5 @@ motions_root: /home/damibran/dev/repos/ProtoMotionsFork/phys_anim/data/motions/s
 one_model_max_train_time_minutes: 60
 patience: 50
 python_path: /home/damibran/anaconda3/envs/ProtoMotionsEnv/bin/python
-to_fine_tune_list:
-- RL_Avatar_Counter_Atk05_Motion
-- RL_Avatar_Dodgle_Left_Motion
-- RL_Avatar_Idle_Battle_Motion
-- RL_Avatar_Kill_3xCombo01_Motion
-- RL_Avatar_Kill_3xCombo02_Motion
-- RL_Avatar_Kill_4xCombo01_Motion
-- RL_Avatar_Shield_BlockRight_Motion
-- RL_Avatar_Sword_ParryBackward04_Motion
+to_fine_tune_list: []
 train_script: /home/damibran/dev/repos/ProtoMotionsFork/phys_anim/train_agent.py

@@ -133,7 +133,7 @@ algo:
 
     # ASE parameters
     infomax_parameters:
-      latent_dim: [ 4 ]
+      latent_dim: [ 64 ]
       latent_types: [ hypersphere ]
 
       mi_reward_w: [ 0.5 ]
@@ -152,7 +152,7 @@ algo:
     #IQL parameters
     expectile: 0.9
     alpha: 0.5
-    batch_size: 128
+    batch_size: 1024
     max_epochs: 1024
     normalize_obs: True
     obs_clamp_value: null

@@ -40,8 +40,8 @@ env:
       component_weights:
         gr_rew_w: 0.0
         lr_rew_w: 0.55
-        gt_rew_w: 0.0
-        rt_rew_w: 0.0
+        gt_rew_w: 0.1 # original 0.0
+        rt_rew_w: 0.1 # original 0.0
         rv_rew_w: 0.0
         rav_rew_w: 0.0
         gv_rew_w: 0.1
@@ -52,6 +52,12 @@ env:
         kbf_rew_w: 0.0
         pow_rew_w: 0.0002
 
+      #- Global translation (gt)
+      #- Global rotation (gr)
+      #- Root translation (rt)
+      #- Root rotation (rr)
+      #- Key bodies (kb)
+      #- Degrees of freedom velocity (dv)
       component_coefficients:
         gt_rew_c: -1
         rt_rew_c: -30

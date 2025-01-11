@@ -193,6 +193,7 @@ class IQL:
             total_r = torch.zeros(self.latent_samples_per_batch * batch_count)
 
             for batch_id in range(batch_count):
+                print(f'Value Batch: {batch_id}')
                 self.dataset["DiscrimObs"] = torch.roll(self.dataset["DiscrimObs"], shifts=-self.config.batch_size)
                 self.dataset["HumanoidObservations"] = torch.roll(self.dataset["HumanoidObservations"], shifts=-self.config.batch_size)
                 self.dataset["Actions"] = torch.roll(self.dataset["Actions"], shifts=-self.config.batch_size)
@@ -277,6 +278,7 @@ class IQL:
             a_loss_tensor_div = torch.zeros(self.latent_samples_per_batch * batch_count)
             a_loss_tensor_total = torch.zeros(self.latent_samples_per_batch * batch_count)
             for batch_id in range(math.ceil(self.dataset_len/self.config.batch_size)):
+                print(f'Actor Batch: {batch_id}')
                 self.dataset["DiscrimObs"] = torch.roll(self.dataset["DiscrimObs"], shifts=-self.config.batch_size)
                 self.dataset["HumanoidObservations"] = torch.roll(self.dataset["HumanoidObservations"], shifts=-self.config.batch_size)
                 self.dataset["Actions"] = torch.roll(self.dataset["Actions"], shifts=-self.config.batch_size)
@@ -332,6 +334,7 @@ class IQL:
             self.log_dict.update({"actor_loss/total": a_loss_tensor_total.mean()})
 
             for batch_id in range(math.ceil(self.dataset_len / self.config.batch_size)):
+                print(f'Encoder Batch: {batch_id}')
                 self.dataset["DiscrimObs"] = torch.roll(self.dataset["DiscrimObs"], shifts=-self.config.batch_size)
                 self.dataset["HumanoidObservations"] = torch.roll(self.dataset["HumanoidObservations"], shifts=-self.config.batch_size)
                 self.dataset["Actions"] = torch.roll(self.dataset["Actions"], shifts=-self.config.batch_size)

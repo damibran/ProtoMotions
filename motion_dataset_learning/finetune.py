@@ -69,7 +69,7 @@ while len(to_fine_tune) > 0:
 
     # move rename
     shutil.move('/home/damibran/dev/repos/ProtoMotionsFork/results/full_body_tracker/lightning_logs/version_0', config['learned_models_root'] + '/' + motion_name)
-    os.rename(config['learned_models_root'] + '/' + motion_name + '/'+'version_0', config['learned_models_root'] + '/' + motion_name + '/' + 'finetune_60_min')
+    os.rename(config['learned_models_root'] + '/' + motion_name + '/'+'version_0', config['learned_models_root'] + '/' + motion_name + '/' + 'finetune_240_min_WO_ET')
 
     # iterate
     config['to_fine_tune_list'] = to_fine_tune
