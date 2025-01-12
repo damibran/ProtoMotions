@@ -153,7 +153,7 @@ algo:
     expectile: 0.9
     alpha: 0.5
     batch_size: 1024
-    max_epochs: 1024
+    max_epochs: 4000
     normalize_obs: True
     obs_clamp_value: null
     discriminator_reward_w: 2.0
