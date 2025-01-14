@@ -334,7 +334,7 @@ class IQL:
                     a_loss_tensor_adw_neglog[batch_id * self.latent_samples_per_batch + i] = actor_out["neglogp"].mean().detach()
                     a_loss_tensor_adw_b_c[batch_id * self.latent_samples_per_batch + i] = actor_adw_loss.detach()
 
-                    actor_adw_loss = torch.clamp(actor_adw_loss,max=200)
+                    #actor_adw_loss = torch.clamp(actor_adw_loss,max=200)
 
                     actor_div_loss, div_loss_log = self.calculate_extra_actor_loss(
                         {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents": latents})
