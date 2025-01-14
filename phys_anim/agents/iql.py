@@ -131,7 +131,7 @@ class IQL:
             )
             self.dataset["Actions"][i] = state_action[i].action
 
-        self.latent_samples_per_batch = 10
+        self.update_steps_per_stage = 1
 
         #test_list = [1,2,3,4]
         #list_roll(test_list, 2)
@@ -140,6 +140,9 @@ class IQL:
         pass
 
     def dataset_roll(self):
+
+        self.dataset["latents"] = torch.roll(self.dataset["latents"], shifts=-self.config.batch_size)
+
         self.dataset["root_pos"] = torch.roll(self.dataset["root_pos"], shifts=-self.config.batch_size)
         self.dataset["root_rot"] = torch.roll(self.dataset["root_rot"], shifts=-self.config.batch_size)
         self.dataset["root_vel"] = torch.roll(self.dataset["root_vel"], shifts=-self.config.batch_size)
@@ -212,65 +215,66 @@ class IQL:
             print(f"Epoch: {self.current_epoch}")
             batch_count = math.ceil(self.dataset_len/self.config.batch_size)
 
-            v_loss_tensor = torch.zeros(self.latent_samples_per_batch * batch_count)
-            q_loss_tensor = torch.zeros(self.latent_samples_per_batch * batch_count)
+            v_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
+            q_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
 
-            desciptor_r = torch.zeros(self.latent_samples_per_batch * batch_count)
-            enc_r = torch.zeros(self.latent_samples_per_batch * batch_count)
-            total_r = torch.zeros(self.latent_samples_per_batch * batch_count)
+            desciptor_r = torch.zeros(self.update_steps_per_stage * batch_count)
+            enc_r = torch.zeros(self.update_steps_per_stage * batch_count)
+            total_r = torch.zeros(self.update_steps_per_stage * batch_count)
+
+            self.dataset["latents"] = self.sample_latent(self.dataset["root_pos"].shape[0])
+
             print(f'Value Step')
-            for batch_id in range(batch_count):
+            for i in range(self.update_steps_per_stage):
+                for batch_id in range(batch_count):
 
-                self.dataset_roll()
+                    self.dataset_roll()
 
-                batch = {
-                    "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
-                    "HumanoidObservations":self.dataset["HumanoidObservations"][0:self.config.batch_size],
-                    "Actions":self.dataset["Actions"][0:self.config.batch_size]
-                }
+                    batch = {
+                        "latents": self.dataset["latents"][0:self.config.batch_size],
+                        "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
+                        "HumanoidObservations":self.dataset["HumanoidObservations"][0:self.config.batch_size],
+                        "Actions":self.dataset["Actions"][0:self.config.batch_size]
+                    }
 
-
-                for i in range(self.latent_samples_per_batch):
-                    latents = self.sample_latent(self.config.batch_size)
-
-                    desc_r = self.calculate_discriminator_reward(batch["DiscrimObs"]).squeeze()
-                    mi_r = self.calc_mi_reward(batch["DiscrimObs"], latents)
+                    desc_r = self.calculate_discriminator_reward(batch["DiscrimObs"]).squeeze()#torch.ones(self.config.batch_size, device=self.device)
+                    mi_r = self.calc_mi_reward(batch["DiscrimObs"], batch["latents"])
 
                     reward = desc_r + mi_r + 1
 
-                    desciptor_r[batch_id * self.latent_samples_per_batch + i] = desc_r.mean().detach()
-                    enc_r[batch_id * self.latent_samples_per_batch + i] = mi_r.mean().detach()
-                    total_r[batch_id * self.latent_samples_per_batch + i] = reward.mean().detach()
+                    desciptor_r[batch_id * self.update_steps_per_stage + i] = desc_r.mean().detach()
+                    enc_r[batch_id * self.update_steps_per_stage + i] = mi_r.mean().detach()
+                    total_r[batch_id * self.update_steps_per_stage + i] = reward.mean().detach()
 
                     """
                     VF Loss
                     """
 
                     q_pred = self.target_critic(
-                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents": latents}).detach()
-                    vf_pred = self.critic_s({"obs": batch["HumanoidObservations"], "latents": latents})
+                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents": batch["latents"]}).detach()
+                    vf_pred = self.critic_s({"obs": batch["HumanoidObservations"], "latents": batch["latents"]})
                     vf_err = vf_pred - q_pred
                     vf_sign = (vf_err > 0).float()
                     vf_weight = (1 - vf_sign) * self.expectile + vf_sign * (1 - self.expectile)
                     value_loss = (vf_weight * (vf_err ** 2)).mean()
 
-                    v_loss_tensor[batch_id * self.latent_samples_per_batch + i] = value_loss.mean().detach()
+                    v_loss_tensor[batch_id * self.update_steps_per_stage + i] = value_loss.mean().detach()
 
                     """
                     QF Loss
                     """
 
                     next_obs = torch.roll(batch["HumanoidObservations"], shifts=-1, dims=0)
-                    next_latents = torch.roll(latents, shifts=-1, dims=0)
+                    next_latents = torch.roll(batch["latents"], shifts=-1, dims=0)
 
                     q_target = reward + self.discount * self.critic_s({"obs": next_obs, "latents": next_latents}).detach()
                     q_target = q_target.detach()
                     q_pred = self.critic_sa({"obs": batch["HumanoidObservations"], "actions": batch["Actions"],
-                                                "latents": latents})
+                                                "latents": batch["latents"]})
 
                     q_loss = self.critic_sa_criterion(q_target, q_pred)
 
-                    q_loss_tensor[batch_id * self.latent_samples_per_batch + i] = q_loss.mean().detach()
+                    q_loss_tensor[batch_id * self.update_steps_per_stage + i] = q_loss.mean().detach()
 
                     """
                     Step
@@ -295,34 +299,33 @@ class IQL:
             self.log_dict.update({"ac/v_loss": v_loss_tensor.mean()})
             self.log_dict.update({"ac/q_loss": q_loss_tensor.mean()})
 
-            a_loss_tensor_adw_exp = torch.zeros(self.latent_samples_per_batch * batch_count)
-            a_loss_tensor_adw_neglog = torch.zeros(self.latent_samples_per_batch * batch_count)
-            a_loss_tensor_adw_b_c = torch.zeros(self.latent_samples_per_batch * batch_count)
-            a_loss_tensor_adw = torch.zeros(self.latent_samples_per_batch * batch_count)
-            a_loss_tensor_div = torch.zeros(self.latent_samples_per_batch * batch_count)
-            a_loss_tensor_total = torch.zeros(self.latent_samples_per_batch * batch_count)
+            a_loss_tensor_adw_exp = torch.zeros(self.update_steps_per_stage * batch_count)
+            a_loss_tensor_adw_neglog = torch.zeros(self.update_steps_per_stage * batch_count)
+            a_loss_tensor_adw_b_c = torch.zeros(self.update_steps_per_stage * batch_count)
+            a_loss_tensor_adw = torch.zeros(self.update_steps_per_stage * batch_count)
+            a_loss_tensor_div = torch.zeros(self.update_steps_per_stage * batch_count)
+            a_loss_tensor_total = torch.zeros(self.update_steps_per_stage * batch_count)
 
             print(f'Actor Step')
-            for batch_id in range(math.ceil(self.dataset_len/self.config.batch_size)):
+            for i in range(self.update_steps_per_stage):
+                for batch_id in range(math.ceil(self.dataset_len/self.config.batch_size)):
 
-                self.dataset_roll()
+                    self.dataset_roll()
 
-                batch = {
-                    "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
-                    "HumanoidObservations":self.dataset["HumanoidObservations"][0:self.config.batch_size],
-                    "Actions":self.dataset["Actions"][0:self.config.batch_size]
-                }
-
-                for i in range(self.latent_samples_per_batch):
-                    latents = self.sample_latent(self.config.batch_size)
+                    batch = {
+                        "latents": self.dataset["latents"][0:self.config.batch_size],
+                        "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
+                        "HumanoidObservations":self.dataset["HumanoidObservations"][0:self.config.batch_size],
+                        "Actions":self.dataset["Actions"][0:self.config.batch_size]
+                    }
 
                     self.actor.training = True
                     actor_out = self.actor.training_forward(
-                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents": latents})
+                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents":  batch["latents"]})
 
                     q_val = self.target_critic(
-                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents": latents})
-                    v_val = self.critic_s({"obs": batch["HumanoidObservations"], "latents": latents})
+                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents":  batch["latents"]})
+                    v_val = self.critic_s({"obs": batch["HumanoidObservations"], "latents":  batch["latents"]})
 
                     adv = q_val - v_val
                     exp_adv = torch.exp(adv / self.beta)
@@ -330,20 +333,20 @@ class IQL:
 
                     actor_adw_loss = (exp_adv * actor_out["neglogp"]).mean()
 
-                    a_loss_tensor_adw_exp[batch_id * self.latent_samples_per_batch + i] = exp_adv.mean().detach()
-                    a_loss_tensor_adw_neglog[batch_id * self.latent_samples_per_batch + i] = actor_out["neglogp"].mean().detach()
-                    a_loss_tensor_adw_b_c[batch_id * self.latent_samples_per_batch + i] = actor_adw_loss.detach()
+                    a_loss_tensor_adw_exp[batch_id * self.update_steps_per_stage + i] = exp_adv.mean().detach()
+                    a_loss_tensor_adw_neglog[batch_id * self.update_steps_per_stage + i] = actor_out["neglogp"].mean().detach()
+                    a_loss_tensor_adw_b_c[batch_id * self.update_steps_per_stage + i] = actor_adw_loss.detach()
 
-                    actor_adw_loss = torch.clamp(actor_adw_loss,max=200)
+                    #actor_adw_loss = torch.clamp(actor_adw_loss,max=100)
 
                     actor_div_loss, div_loss_log = self.calculate_extra_actor_loss(
-                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents": latents})
+                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents": batch["latents"]})
 
                     actor_loss = actor_adw_loss + actor_div_loss
 
-                    a_loss_tensor_adw[batch_id * self.latent_samples_per_batch + i] = actor_adw_loss.mean().detach()
-                    a_loss_tensor_div[batch_id * self.latent_samples_per_batch + i] = actor_div_loss.mean().detach()
-                    a_loss_tensor_total[batch_id * self.latent_samples_per_batch + i] = actor_loss.mean().detach()
+                    a_loss_tensor_adw[batch_id * self.update_steps_per_stage + i] = actor_adw_loss.mean().detach()
+                    a_loss_tensor_div[batch_id * self.update_steps_per_stage + i] = actor_div_loss.mean().detach()
+                    a_loss_tensor_total[batch_id * self.update_steps_per_stage + i] = actor_loss.mean().detach()
 
                     self.actor_optimizer.zero_grad()
                     self.fabric.backward(actor_loss.mean())
@@ -357,30 +360,29 @@ class IQL:
             self.log_dict.update({"actor_loss/total": a_loss_tensor_total.mean()})
 
             print(f'Encoder Step')
-            for batch_id in range(math.ceil(self.dataset_len / self.config.batch_size)):
+            for i in range(self.update_steps_per_stage):
+                for batch_id in range(math.ceil(self.dataset_len / self.config.batch_size)):
 
-                self.dataset_roll()
+                    self.dataset_roll()
 
-                batch = {
-                    "root_pos" : self.dataset["root_pos"][0:self.config.batch_size],
-                    "root_rot": self.dataset["root_rot"][0:self.config.batch_size],
-                    "root_vel": self.dataset["root_vel"][0:self.config.batch_size],
-                    "root_ang_vel": self.dataset["root_ang_vel"][0:self.config.batch_size],
-                    "dof_pos": self.dataset["dof_pos"][0:self.config.batch_size],
-                    "dof_vel": self.dataset["dof_vel"][0:self.config.batch_size],
-                    "dof_vel": self.dataset["dof_vel"][0:self.config.batch_size],
-                    "key_body_pos": self.dataset["key_body_pos"][0:self.config.batch_size],
-                    "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
-                    "HumanoidObservations": self.dataset["HumanoidObservations"][0:self.config.batch_size],
-                    "Actions": self.dataset["Actions"][0:self.config.batch_size]
-                }
-
-                for i in range(self.latent_samples_per_batch):
-                    latents = self.sample_latent(self.config.batch_size)
+                    batch = {
+                        "latents": self.dataset["latents"][0:self.config.batch_size],
+                        "root_pos" : self.dataset["root_pos"][0:self.config.batch_size],
+                        "root_rot": self.dataset["root_rot"][0:self.config.batch_size],
+                        "root_vel": self.dataset["root_vel"][0:self.config.batch_size],
+                        "root_ang_vel": self.dataset["root_ang_vel"][0:self.config.batch_size],
+                        "dof_pos": self.dataset["dof_pos"][0:self.config.batch_size],
+                        "dof_vel": self.dataset["dof_vel"][0:self.config.batch_size],
+                        "dof_vel": self.dataset["dof_vel"][0:self.config.batch_size],
+                        "key_body_pos": self.dataset["key_body_pos"][0:self.config.batch_size],
+                        "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
+                        "HumanoidObservations": self.dataset["HumanoidObservations"][0:self.config.batch_size],
+                        "Actions": self.dataset["Actions"][0:self.config.batch_size]
+                    }
 
                     self.actor.training = False
                     actor_eval_out = self.actor.eval_forward(
-                        {"obs": batch["HumanoidObservations"], "latents": latents})
+                        {"obs": batch["HumanoidObservations"], "latents": batch["latents"]})
 
                     agent_disc_obs = build_disc_action_observations(
                         batch["root_pos"],
@@ -401,7 +403,7 @@ class IQL:
                     )
 
                     disc_loss, disc_log_dict = self.encoder_step(
-                        {"AgentDiscObs": agent_disc_obs, "DemoDiscObs": batch["DiscrimObs"], "latents": latents})
+                        {"AgentDiscObs": agent_disc_obs, "DemoDiscObs": batch["DiscrimObs"], "latents": batch["latents"]})
                     self.log_dict.update(disc_log_dict)
 
                     self.discriminator_optimizer.zero_grad()
