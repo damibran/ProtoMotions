@@ -9,9 +9,9 @@ env:
   config:
     # Simulation params
     ## Observations
-    discriminator_obs_historical_steps: 1 # todo: review
+    discriminator_obs_historical_steps: 10 # todo: review
     disable_discriminator: False
-    discriminator_obs_size_per_step: ${eval:13+2*${robot.dof_obs_size}+${robot.number_of_actions}+3*${robot.num_key_bodies}}
+    discriminator_obs_size_per_step: ${robot.dof_obs_size}
 
     ## Motion-related params
     ### Respawn related params

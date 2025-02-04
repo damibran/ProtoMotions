@@ -31,7 +31,7 @@ from torch import Tensor
 
 from phys_anim.envs.amp.common import BaseDisc
 from phys_anim.envs.humanoid.isaacgym import Humanoid
-from phys_anim.envs.humanoid.humanoid_utils import build_disc_action_observations
+from phys_anim.envs.humanoid.humanoid_utils import build_disc_state_action_observations, build_disc_action_observations
 
 
 class DiscHumanoid(BaseDisc, Humanoid):  # type: ignore[misc]
@@ -63,17 +63,7 @@ class DiscActionHumanoid(DiscHumanoid):  # type: ignore[misc]
         ref_state = self.motion_lib.get_motion_state(motion_ids, motion_times)
 
         disc_obs_demo = build_disc_action_observations(
-            ref_state.root_pos,
-            ref_state.root_rot,
-            ref_state.root_vel,
-            ref_state.root_ang_vel,
-            ref_state.dof_pos,
-            ref_state.dof_vel,
-            ref_state.key_body_pos,
-            torch.zeros(len(motion_ids), 1, device=self.device),
             ref_state.action,
-            self.config.humanoid_obs.local_root_obs,
-            self.config.humanoid_obs.root_height_obs,
             self.dof_obs_size,
             self.get_dof_offsets(),
             False,
@@ -113,17 +103,7 @@ class DiscActionHumanoid(DiscHumanoid):  # type: ignore[misc]
         ref_state = self.motion_lib.get_motion_state(motion_ids, motion_times)
 
         disc_obs_demo = build_disc_action_observations(
-            ref_state.root_pos,
-            ref_state.root_rot,
-            ref_state.root_vel,
-            ref_state.root_ang_vel,
-            ref_state.dof_pos,
-            ref_state.dof_vel,
-            ref_state.key_body_pos,
-            torch.zeros(len(motion_ids), 1, device=self.device),
             ref_state.action,
-            self.config.humanoid_obs.local_root_obs,
-            self.config.humanoid_obs.root_height_obs,
             self.dof_obs_size,
             self.get_dof_offsets(),
             False,
@@ -139,17 +119,7 @@ class DiscActionHumanoid(DiscHumanoid):  # type: ignore[misc]
 
         if env_ids is None:
             disc_obs = build_disc_action_observations(
-                current_state.body_pos[:, 0, :],
-                current_state.body_rot[:, 0, :],
-                current_state.body_vel[:, 0, :],
-                current_state.body_ang_vel[:, 0, :],
-                dof_pos,
-                dof_vel,
-                key_body_pos,
-                self.get_ground_heights(current_state.body_pos[:, 0, :2]),
                 self.actions,
-                self.config.humanoid_obs.local_root_obs,
-                self.config.humanoid_obs.root_height_obs,
                 self.dof_obs_size,
                 self.get_dof_offsets(),
                 False,
@@ -158,17 +128,7 @@ class DiscActionHumanoid(DiscHumanoid):  # type: ignore[misc]
             self.disc_hist_buf.set_curr(disc_obs)
         else:
             disc_obs = build_disc_action_observations(
-                current_state.body_pos[env_ids, 0, :],
-                current_state.body_rot[env_ids, 0, :],
-                current_state.body_vel[env_ids, 0, :],
-                current_state.body_ang_vel[env_ids, 0, :],
-                dof_pos[env_ids],
-                dof_vel[env_ids],
-                key_body_pos[env_ids],
-                self.get_ground_heights(current_state.body_pos[:, 0, :2])[env_ids],
                 self.actions[env_ids],
-                self.config.humanoid_obs.local_root_obs,
-                self.config.humanoid_obs.root_height_obs,
                 self.dof_obs_size,
                 self.get_dof_offsets(),
                 False,

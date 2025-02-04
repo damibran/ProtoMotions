@@ -434,7 +434,7 @@ def build_disc_observations(
         return obs, obs_dict
 
 @torch.jit.script
-def build_disc_action_observations(
+def build_disc_state_action_observations(
     root_pos: Tensor,
     root_rot: Tensor,
     root_vel: Tensor,
@@ -523,6 +523,27 @@ def build_disc_action_observations(
         res_dict['actions'] = action_obs
 
         return obs, res_dict
+
+@torch.jit.script
+def build_disc_action_observations(
+    actions: Tensor,
+    dof_obs_size: int,
+    dof_offsets: List[int],
+    return_dict: bool,
+    w_last: bool,
+) -> Union[Tensor, Tuple[Tensor, Dict[str, Tensor]]]:
+
+    res_dict = {}
+
+    action_obs = dof_to_obs(actions, dof_obs_size, dof_offsets, w_last)
+
+    if not return_dict:
+        return action_obs
+
+    else:
+        res_dict['actions'] = action_obs
+
+        return action_obs, res_dict
 
 @torch.jit.script
 def quat_diff_norm(quat1: Tensor, quat2: Tensor, w_last: bool):
