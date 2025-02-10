@@ -210,7 +210,7 @@ class IQL:
             discriminator, discriminator_optimizer
         )
 
-        state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_5/last.ckpt", map_location=self.device)
+        state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_0/last.ckpt", map_location=self.device)
         self.actor.load_state_dict(state_dict["actor"])
         self.save(name="last_a.ckpt")
 
@@ -245,9 +245,10 @@ class IQL:
                     #desc_r = self.calculate_discriminator_reward(batch["DiscrimObs"]).squeeze()#torch.ones(self.config.batch_size, device=self.device)
                     #mi_r = self.calc_mi_reward(batch["DiscrimObs"], batch["latents"])
 
+                    self.actor.eval()
                     actor_div_loss, div_loss_log = self.calculate_extra_actor_loss(
                         {"obs": batch["HumanoidObservations"], "actions": batch["Actions"],
-                         "latents": batch["latents"]})
+                         "latents": batch["latents"]},eval=True)
 
                     reward = -actor_div_loss
 
@@ -258,7 +259,8 @@ class IQL:
                     """
                     VF Loss
                     """
-
+                    self.target_critic.train()
+                    self.critic_s.train()
                     q_pred = self.target_critic(
                         {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents": batch["latents"]}).detach()
                     vf_pred = self.critic_s({"obs": batch["HumanoidObservations"], "latents": batch["latents"]})
@@ -332,6 +334,8 @@ class IQL:
                     actor_out = self.actor.training_forward(
                         {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents":  batch["latents"]})
 
+                    self.target_critic.eval()
+                    self.critic_s.eval()
                     q_val = self.target_critic(
                         {"obs": batch["HumanoidObservations"], "actions": batch["Actions"], "latents":  batch["latents"]})
                     v_val = self.critic_s({"obs": batch["HumanoidObservations"], "latents":  batch["latents"]})
@@ -459,13 +463,13 @@ class IQL:
         return latents
 
     # aka calculate diversity_loss
-    def calculate_extra_actor_loss(self, batch_dict) -> Tuple[Tensor, Dict]:
+    def calculate_extra_actor_loss(self, batch_dict, eval=False) -> Tuple[Tensor, Dict]:
         extra_loss, extra_actor_log_dict = torch.tensor(0.0, device=self.device), {}
 
         if self.config.infomax_parameters.diversity_bonus <= 0:
             return extra_loss, extra_actor_log_dict
 
-        diversity_loss = self.diversity_loss(batch_dict)
+        diversity_loss = self.diversity_loss(batch_dict,eval)
 
         extra_actor_log_dict["actor/diversity_loss"] = diversity_loss.detach()
 
@@ -475,14 +479,20 @@ class IQL:
             extra_actor_log_dict,
         )
 
-    def diversity_loss(self, batch_dict):
+    def diversity_loss(self, batch_dict,eval=False):
         prev_latents = batch_dict["latents"]
         new_latents = (self.sample_latent(batch_dict["obs"].shape[0]))
         batch_dict["latents"] = new_latents
-        new_outs = self.actor.training_forward(batch_dict)
+        if not eval:
+            new_outs = self.actor.training_forward(batch_dict)
+        else:
+            new_outs = self.actor.eval_forward(batch_dict)
 
         batch_dict["latents"] = prev_latents
-        old_outs = self.actor.training_forward(batch_dict)
+        if not eval:
+            old_outs = self.actor.training_forward(batch_dict)
+        else:
+            old_outs = self.actor.eval_forward(batch_dict)
 
         clipped_new_mu = torch.clamp(new_outs["mus"], -1.0, 1.0)
         clipped_old_mu = torch.clamp(old_outs["mus"], -1.0, 1.0)
