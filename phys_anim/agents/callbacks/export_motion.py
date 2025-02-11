@@ -56,6 +56,10 @@ class ExportMotion(RL_EvalCallback):
         env: BaseHumanoid = self.training_loop.env
         self.env = env
 
+    def on_pre_eval_env_step(self, actor_state):
+        actor_state["actions"] = actor_state["sampled_actions"]
+        return actor_state
+
     def on_post_evaluate_policy(self):
         self.write_recordings()
 

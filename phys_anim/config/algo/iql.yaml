@@ -2,6 +2,13 @@
 
 algo:
   config:
+
+    motion_files:
+      - output/recordings/IQL_seconddataset/sword_shield_state_action_0.yaml
+      - output/recordings/IQL_seconddataset/sword_shield_state_action_1.yaml
+      - output/recordings/IQL_seconddataset/sword_shield_state_action_2.yaml
+      - output/recordings/IQL_seconddataset/sword_shield_state_action_3.yaml
+
     models:
       terrain_models:
         mlp: null

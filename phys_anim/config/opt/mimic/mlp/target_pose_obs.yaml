@@ -33,7 +33,7 @@ algo:
 
 env:
   config:
-    max_episode_length: 300
+    max_episode_length: 10000 # original 300
 
     mimic_target_pose:
       enabled: True

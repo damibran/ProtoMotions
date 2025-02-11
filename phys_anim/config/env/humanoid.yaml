@@ -16,7 +16,7 @@ env:
     backbone: ${backbone}
 
     # Simulation params
-    max_episode_length: 300
+    max_episode_length: 300 # original 300
     robot: ${robot}
 
     ## Observations

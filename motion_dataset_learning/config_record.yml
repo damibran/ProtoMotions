@@ -1,5 +1,7 @@
+each_motion_count: 4
 eval_script: /home/damibran/dev/repos/ProtoMotionsFork/phys_anim/eval_agent.py
 learned_models_root: /home/damibran/dev/repos/ProtoMotionsFork/motion_dataset_learning/results
 motions_root: /home/damibran/dev/repos/ProtoMotionsFork/phys_anim/data/motions/sword_shield
 python_path: /home/damibran/anaconda3/envs/ProtoMotionsEnv/bin/python
+recordings_root: /home/damibran/dev/repos/ProtoMotionsFork/output/recordings/000
 to_record_list: []

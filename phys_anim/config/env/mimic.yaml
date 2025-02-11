@@ -82,8 +82,8 @@ env:
       update_dynamic_weight_epochs: 5
 
     mimic_reset_track:
-      steps_min: 10
-      steps_max: 600
+      steps_min: 1000000 # original 10
+      steps_max: 1000001 # original 600
       grace_period: 5
       reset_on_episode_reset: False
       reset_episode_on_reset_track: True
