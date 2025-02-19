@@ -65,7 +65,7 @@ class ExportMotion(RL_EvalCallback):
 
     def write_recordings(self):
         fps = np.round(1.0 / self.env.dt)
-        for idx in range(self.env.num_envs):
+        for idx in range(self.env.config.env_num_to_export):
             trajectory_data = self.env.motion_recording
 
             save_dir = self.record_dir / f"{(idx):03d}"#+ self.config.index_offset

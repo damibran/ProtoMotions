@@ -253,6 +253,10 @@ class PPO:
         self.time_report.start_timer("algorithm")
         self.fabric.call("on_fit_start", self)
 
+        self.create_eval_callbacks()
+        for c in self.eval_callbacks:
+            c.on_pre_evaluate_policy()
+
         while self.current_epoch < self.config.max_epochs:
             self.epoch_start_time = time.time()
             self.time_report.start_timer("epoch")
@@ -322,6 +326,8 @@ class PPO:
             if self.should_stop:
                 self.save()
                 exit(0)
+
+        self.post_evaluate_policy()
 
         self.time_report.end_timer("algorithm")
         self.time_report.report()

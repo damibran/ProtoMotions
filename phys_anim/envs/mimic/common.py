@@ -718,23 +718,24 @@ class BaseMimic(MimicHumanoid):  # type: ignore[misc]
         if skip:
             return
 
-        if "target_poses" not in self.motion_recording:
-            self.motion_recording["target_poses"] = []
-
-        ref_state = self.motion_lib.get_mimic_motion_state(
-            self.motion_ids, self.motion_times
-        )
-        target_pos = ref_state.rb_pos
-        target_pos += self.respawn_offset_relative_to_data.clone().view(
-            self.num_envs, 1, 3
-        )
-
-        self.motion_recording["target_poses"].append(target_pos.cpu().numpy())
+        env_num_to_export = self.config.env_num_to_export
+        #if "target_poses" not in self.motion_recording:
+        #    self.motion_recording["target_poses"] = []
+#
+        #ref_state = self.motion_lib.get_mimic_motion_state(
+        #    self.motion_ids, self.motion_times
+        #)
+        #target_pos = ref_state.rb_pos
+        #target_pos += self.respawn_offset_relative_to_data.clone().view(
+        #    self.num_envs, 1, 3
+        #)
+#
+        #self.motion_recording["target_poses"].append(target_pos.cpu().numpy())
 
         if self.config.get("export_action", False):
             if "actions" not in self.motion_recording:
                 self.motion_recording["actions"] = []
-            self.motion_recording["actions"].append(self.actions.cpu().numpy())
+            self.motion_recording["actions"].append(self.actions[0:env_num_to_export].cpu().numpy())
 
 
     def process_kb(self, gt: Tensor, gr: Tensor):

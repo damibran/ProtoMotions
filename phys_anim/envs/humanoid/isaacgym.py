@@ -1577,19 +1577,20 @@ class Humanoid(BaseHumanoid, GymBaseInterface):  # type: ignore[misc]
         The data is stored in the motion_recording dictionary for later use or analysis.
         """
         # Capture root position
-        root_position = self.humanoid_root_states[..., 0:3].clone()
+        env_num_to_export = self.config.env_num_to_export
+        root_position = self.humanoid_root_states[0:env_num_to_export, ..., 0:3].clone()
 
         # Process body rotation
-        body_rotation = self.rigid_body_rot.clone()
-        negative_w_mask = body_rotation[..., -1] < 0
+        body_rotation = self.rigid_body_rot[0:env_num_to_export].clone()
+        negative_w_mask = body_rotation[0:env_num_to_export, ..., -1] < 0
         body_rotation[negative_w_mask] = -body_rotation[negative_w_mask]
 
         # Prepare motion data dictionary
         current_motion_data = {
             "root_pos": root_position.cpu(),
             "global_rot": body_rotation.cpu(),
-            "rigid_body_rot": self.rigid_body_rot.clone().cpu(),
-            "rigid_body_pos": self.rigid_body_pos.clone().cpu(),
+            "rigid_body_rot": self.rigid_body_rot[0:env_num_to_export].clone().cpu(),
+            "rigid_body_pos": self.rigid_body_pos[0:env_num_to_export].clone().cpu(),
         }
 
         # Store motion data

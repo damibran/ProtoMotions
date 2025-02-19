@@ -40,8 +40,8 @@ env:
       component_weights:
         gr_rew_w: 0.0
         lr_rew_w: 0.55
-        gt_rew_w: 0.1 # original 0.0
-        rt_rew_w: 0.1 # original 0.0
+        gt_rew_w: 0.0 # original 0.0
+        rt_rew_w: 0.0 # original 0.0
         rv_rew_w: 0.0
         rav_rew_w: 0.0
         gv_rew_w: 0.1
@@ -82,8 +82,8 @@ env:
       update_dynamic_weight_epochs: 5
 
     mimic_reset_track:
-      steps_min: 1000000 # original 10
-      steps_max: 1000001 # original 600
+      steps_min: 10 # original 10
+      steps_max: 600 # original 600
       grace_period: 5
       reset_on_episode_reset: False
       reset_episode_on_reset_track: True

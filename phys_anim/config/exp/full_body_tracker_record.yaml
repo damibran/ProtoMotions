@@ -1,0 +1,16 @@
+# @package _global_
+
+defaults:
+  - /algo: mimic
+  - /env: mimic
+  - /opt/disable_discriminator  # Default mimic experiments don't use the discriminator
+  - /opt/mimic/mlp/target_pose_obs
+  - /opt/mimic/global_tracking
+  - /opt/record_motion
+  - /opt/mimic/early_termination_tracking_err
+
+#env:
+#  config:
+#    action_as_dof: True
+
+experiment_name: full_body_tracker
