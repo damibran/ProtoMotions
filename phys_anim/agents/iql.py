@@ -254,9 +254,8 @@ class IQL:
 
             v_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             q_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
-
-            # desciptor_r = torch.zeros(self.update_steps_per_stage * batch_count)
-            # enc_r = torch.zeros(self.update_steps_per_stage * batch_count)
+            desciptor_r = torch.zeros(self.update_steps_per_stage * batch_count)
+            enc_r = torch.zeros(self.update_steps_per_stage * batch_count)
             total_r = torch.zeros(self.update_steps_per_stage * batch_count)
             for i in range(self.update_steps_per_stage):
                 for batch_id in range(batch_count):
@@ -270,18 +269,13 @@ class IQL:
                         "Actions": self.dataset["Actions"][0:self.config.batch_size]
                     }
 
-                    # desc_r = self.calculate_discriminator_reward(batch["DiscrimObs"]).squeeze()#torch.ones(self.config.batch_size, device=self.device)
-                    # mi_r = self.calc_mi_reward(batch["DiscrimObs"], batch["latents"])
+                    desc_r = self.calculate_discriminator_reward(batch["DiscrimObs"]).squeeze()#torch.ones(self.config.batch_size, device=self.device)
+                    mi_r = self.calc_mi_reward(batch["DiscrimObs"], batch["latents"])
 
-                    self.actor.eval()
-                    actor_div_loss, div_loss_log = self.calculate_extra_actor_loss(
-                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"],
-                         "latents": batch["latents"]}, eval=True)
+                    reward = desc_r + mi_r + 1
 
-                    reward = -actor_div_loss
-
-                    # desciptor_r[batch_id * self.update_steps_per_stage + i] = desc_r.mean().detach()
-                    # enc_r[batch_id * self.update_steps_per_stage + i] = mi_r.mean().detach()
+                    desciptor_r[batch_id * self.update_steps_per_stage + i] = desc_r.mean().detach()
+                    enc_r[batch_id * self.update_steps_per_stage + i] = mi_r.mean().detach()
                     total_r[batch_id * self.update_steps_per_stage + i] = reward.mean().detach()
 
                     """
@@ -333,8 +327,8 @@ class IQL:
                         param_target.data = (1 - self.alpha) * param_target.data + self.alpha * param_cur.data
 
             self.log_dict.update({
-                # "reward/desc":desciptor_r.mean(),
-                # "reward/end": enc_r.mean(),
+                "reward/desc":desciptor_r.mean(),
+                "reward/end": enc_r.mean(),
                 "reward/total": total_r.mean()
             })
             self.log_dict.update({"ac/v_loss": v_loss_tensor.mean()})
@@ -344,7 +338,7 @@ class IQL:
             a_loss_tensor_adw_neglog = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_adw_b_c = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_adw = torch.zeros(self.update_steps_per_stage * batch_count)
-            # a_loss_tensor_div = torch.zeros(self.update_steps_per_stage * batch_count)
+            a_loss_tensor_div = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_total = torch.zeros(self.update_steps_per_stage * batch_count)
 
             print(f'Actor Step')
@@ -384,10 +378,13 @@ class IQL:
 
                     # actor_adw_loss = torch.clamp(actor_adw_loss,max=100)
 
-                    actor_loss = actor_adw_loss
+                    actor_div_loss, div_loss_log = self.calculate_extra_actor_loss(
+                        {"obs": batch["HumanoidObservations"], "latents": batch["latents"], "actions": batch["Actions"]})
+
+                    actor_loss = actor_adw_loss + actor_div_loss
 
                     a_loss_tensor_adw[batch_id * self.update_steps_per_stage + i] = actor_adw_loss.mean().detach()
-                    # a_loss_tensor_div[batch_id * self.update_steps_per_stage + i] = actor_div_loss.mean().detach()
+                    a_loss_tensor_div[batch_id * self.update_steps_per_stage + i] = actor_div_loss.mean().detach()
                     a_loss_tensor_total[batch_id * self.update_steps_per_stage + i] = actor_loss.mean().detach()
 
                     self.actor_optimizer.zero_grad()
@@ -398,10 +395,9 @@ class IQL:
             self.log_dict.update({"actor_loss/neg_log": a_loss_tensor_adw_neglog.mean()})
             self.log_dict.update({"actor_loss/adw_before_clip": a_loss_tensor_adw_b_c.mean()})
             self.log_dict.update({"actor_loss/adw_after_clip": a_loss_tensor_adw.mean()})
-            # self.log_dict.update({"actor_loss/div": a_loss_tensor_div.mean()})
+            self.log_dict.update({"actor_loss/div": a_loss_tensor_div.mean()})
             self.log_dict.update({"actor_loss/total": a_loss_tensor_total.mean()})
 
-            '''print(f'Encoder Step')
             for i in range(self.update_steps_per_stage):
                 for batch_id in range(math.ceil(self.dataset_len / self.config.batch_size)):
 
@@ -450,7 +446,7 @@ class IQL:
 
                     self.discriminator_optimizer.zero_grad()
                     self.fabric.backward(disc_loss)
-                    self.discriminator_optimizer.step()'''
+                    self.discriminator_optimizer.step()
 
             self.fabric.log_dict(self.log_dict, self.current_epoch)
 
