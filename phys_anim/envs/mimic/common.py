@@ -735,7 +735,7 @@ class BaseMimic(MimicHumanoid):  # type: ignore[misc]
         if self.config.get("export_action", False):
             if "actions" not in self.motion_recording:
                 self.motion_recording["actions"] = []
-            self.motion_recording["actions"].append(self.actions[0:env_num_to_export].cpu().numpy())
+            self.motion_recording["actions"].append(self.actions[0:env_num_to_export].clone().cpu())
 
 
     def process_kb(self, gt: Tensor, gr: Tensor):

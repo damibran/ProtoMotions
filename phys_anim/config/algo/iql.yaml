@@ -3,6 +3,10 @@
 algo:
   config:
 
+    dataset_files:
+      - output/recordings/000/RL_Avatar_Idle_Ready_Motion.npy
+      - output/recordings/001/RL_Avatar_Idle_Ready_Motion.npy
+
     motion_files:
       - output/recordings/IQL_seconddataset/sword_shield_state_action_0.yaml
       - output/recordings/IQL_seconddataset/sword_shield_state_action_1.yaml

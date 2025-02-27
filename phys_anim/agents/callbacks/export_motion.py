@@ -105,7 +105,9 @@ class ExportMotion(RL_EvalCallback):
                 #    )
 
                 if "actions" in trajectory_data:
-                    actions = torch.tensor(trajectory_data["actions"])
+                    actions = torch.stack(
+                        [actions[idx] for actions in trajectory_data["actions"]]
+                    )
                     np.save(
                         str(save_dir / f"{motion_name}_actions.npy"),
                         actions.cpu().numpy()
