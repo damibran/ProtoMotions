@@ -61,6 +61,7 @@ class BaseInterface(object):
     def physics_step(self):
         if self.isaac_pd:
             self.apply_pd_control()
+            pass
         for i in range(self.control_freq_inv):
             if not self.isaac_pd:
                 self.apply_motor_forces()

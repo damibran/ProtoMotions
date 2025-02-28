@@ -16,7 +16,7 @@ class CalmEncoderTrainer:
     def __init__(self):
         self._calm_latent_shape = 64
 
-        self.motion_file = 'phys_anim/data/motions/sword_shield/dataset_reallusion_sword_shield.yaml'
+        self.motion_file = 'phys_anim/data/motions/sword_shield_enc/dataset_reallusion_sword_shield.yaml'
 
         robot_dfs_dof_body_names = ['pelvis', 'torso', 'head', 'right_upper_arm', 'right_lower_arm', 'right_hand', 'sword', 'left_upper_arm', 'left_lower_arm', 'shield', 'left_hand', 'right_thigh', 'right_shin', 'right_foot', 'left_thigh', 'left_shin', 'left_foot']
 
@@ -121,10 +121,10 @@ class CalmEncoderTrainer:
 
         enc_motion_times = self._motion_lib.sample_time(motion_ids, truncate_time=enc_window_size)
         # make sure not to add more than motion clip length, negative amp_obs will show zero index amp_obs instead
-        enc_motion_times += torch.clip(self._motion_lib._motion_lengths[motion_ids], max=enc_window_size)
+        enc_motion_times += torch.clip(self._motion_lib.get_motion_length(motion_ids), max=enc_window_size)
 
         # sub-window-size is for the amp_obs contained within the enc-amp-obs. make sure we sample only within the valid portion of the motion
-        sub_window_size = torch.clip(self._motion_lib._motion_lengths[motion_ids], max=enc_window_size) - self.dt * self._num_amp_obs_steps
+        sub_window_size = torch.clip(self._motion_lib.get_motion_length(motion_ids), max=enc_window_size) - self.dt * self._num_amp_obs_steps
         motion_times = enc_motion_times - torch.rand(enc_motion_times.shape, device=self.device) * sub_window_size
 
         enc_amp_obs_demo = self.build_disc_obs_demo(motion_ids, enc_motion_times).view(-1, self._num_amp_obs_enc_steps, self._num_amp_obs_per_step)
@@ -144,10 +144,10 @@ class CalmEncoderTrainer:
         enc_window_size = self.dt * (self._num_amp_obs_enc_steps - 1)
 
         motion_times0 = self._motion_lib.sample_time(motion_ids, truncate_time=enc_window_size)
-        motion_times0 += torch.clip(self._motion_lib._motion_lengths[motion_ids], max=enc_window_size)
+        motion_times0 += torch.clip(self._motion_lib.get_motion_length(motion_ids), max=enc_window_size)
 
-        motion_times1 = motion_times0 + torch.rand(motion_times0.shape, device=self._motion_lib._device) * 0.5
-        motion_times1 = torch.min(motion_times1, self._motion_lib._motion_lengths[motion_ids])
+        motion_times1 = motion_times0 + torch.rand(motion_times0.shape, device=self.device) * 0.5
+        motion_times1 = torch.min(motion_times1, self._motion_lib.get_motion_length(motion_ids))
 
         motion_times = torch.cat((motion_times0, motion_times1), dim=0)
 

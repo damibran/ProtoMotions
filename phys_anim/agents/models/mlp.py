@@ -110,11 +110,15 @@ class MultiHeadedMLP(MLP_WithNorm):
         return self.feature_size
 
     def forward(self, input_dict, already_normalized=False, return_norm_obs=False):
+        pass
         obs = (
             self.maybe_normalize_obs(input_dict["obs"])
             if not already_normalized
             else input_dict["obs"]
         )
+
+        #torch.set_printoptions(threshold=10_000)
+        #print(input_dict["mimic_target_poses"])
 
         cat_obs = obs
         for key in self.extra_input_keys:

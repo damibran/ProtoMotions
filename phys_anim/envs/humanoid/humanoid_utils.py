@@ -35,8 +35,8 @@ import math
 
 from isaac_utils import torch_utils, rotations
 
-
-@torch.jit.script
+#todo:
+#@torch.jit.script
 def dof_to_obs(
     pose: Tensor, dof_obs_size: int, dof_offsets: List[int], w_last: bool
 ) -> Tensor:
@@ -348,8 +348,8 @@ def compute_humanoid_reset(
 
     return reset, terminated
 
-
-@torch.jit.script
+#todo:
+#@torch.jit.script
 def build_disc_observations(
     root_pos: Tensor,
     root_rot: Tensor,

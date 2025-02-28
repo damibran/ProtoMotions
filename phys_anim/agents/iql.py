@@ -350,9 +350,9 @@ class IQL:
             discriminator, discriminator_optimizer
         )
 
-        state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_1/last.ckpt", map_location=self.device)
-        self.actor.load_state_dict(state_dict["actor"])
-        self.save(name="last_a.ckpt")
+        #state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_1/last.ckpt", map_location=self.device)
+        #self.actor.load_state_dict(state_dict["actor"])
+        #self.save(name="last_a.ckpt")
 
     def fit(self):
 
@@ -385,7 +385,7 @@ class IQL:
                     desc_r = self.calculate_discriminator_reward(batch["DiscrimObs"]).squeeze()#torch.ones(self.config.batch_size, device=self.device)
                     mi_r = self.calc_mi_reward(batch["DiscrimObs"], batch["latents"])
 
-                    reward = desc_r + mi_r + 1
+                    reward = desc_r.detach() + mi_r.detach() + 1
 
                     desciptor_r[batch_id * self.update_steps_per_stage + i] = desc_r.mean().detach()
                     enc_r[batch_id * self.update_steps_per_stage + i] = mi_r.mean().detach()
@@ -478,7 +478,7 @@ class IQL:
                          "latents": batch["latents"]})
                     v_val = self.critic_s({"obs": batch["HumanoidObservations"], "latents": batch["latents"]})
 
-                    adv = q_val - v_val
+                    adv = q_val.detach() - v_val.detach()
                     exp_adv = torch.exp(adv / self.beta)
                     exp_adv = torch.clamp(exp_adv, max=100)
 
@@ -546,8 +546,9 @@ class IQL:
                     }
 
                     self.actor.training = False
-                    actor_eval_out = self.actor.eval_forward(
-                        {"obs": batch["HumanoidObservations"], "latents": batch["latents"]})
+                    with torch.no_grad():
+                        actor_eval_out = self.actor.eval_forward(
+                            {"obs": batch["HumanoidObservations"], "latents": batch["latents"]})
 
                     agent_disc_obs = build_disc_action_observations(
                         batch["root_pos"],

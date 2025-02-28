@@ -1059,6 +1059,9 @@ class BaseMimic(MimicHumanoid):  # type: ignore[misc]
                 num_future_steps=num_future_steps,
             )
 
+        #torch.set_printoptions(threshold=10_000)
+        #print(target_pose_obs)
+
         return target_pose_obs
 
     def add_time_to_target_poses(self, env_ids, target_pose_obs, num_future_steps):
