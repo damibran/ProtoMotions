@@ -118,7 +118,7 @@ class MultiHeadedMLP(MLP_WithNorm):
         )
 
         #torch.set_printoptions(threshold=10_000)
-        #print(input_dict["mimic_target_poses"])
+        #print(f'mlp_forward_obs: {input_dict["obs"]}')
 
         cat_obs = obs
         for key in self.extra_input_keys:
