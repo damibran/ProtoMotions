@@ -199,6 +199,9 @@ class BaseHumanoid(Humanoid):
             else:
                 xy_position = self.terrain.sample_valid_locations(len(env_ids))
 
+        #todo: temp
+        #xy_position = torch.zeros_like(xy_position)
+
         if scene_ids is not None:
             if -2 in scene_ids:
                 raise NotImplementedError(
@@ -451,6 +454,8 @@ class BaseHumanoid(Humanoid):
                 self.config.humanoid_obs.root_height_obs,
                 self.w_last,
             )
+
+            pass
 
         else:
             dof_pos, dof_vel = self.get_dof_state()
