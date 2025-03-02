@@ -113,6 +113,16 @@ class ExportMotion(RL_EvalCallback):
                         actions.cpu().numpy()
                     )
 
+                if "reset" in trajectory_data:
+                    reset = torch.stack(
+                        [resets[idx] for resets in trajectory_data["reset"]]
+                    )
+
+                    np.save(
+                        str(save_dir / f"{motion_name}_reset.npy"),
+                        reset.cpu().numpy()
+                    )
+
                 if hasattr(self.env, "object_ids") and self.env.object_ids[idx] >= 0:
                     object_id = self.env.object_ids[idx].item()
                     object_category, object_name = self.env.spawned_object_names[

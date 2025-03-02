@@ -1,3 +1,4 @@
+import os.path
 import random
 from pathlib import Path
 from typing import List, Tuple, Dict
@@ -14,6 +15,7 @@ from phys_anim.envs.env_utils.general import StepTracker
 from phys_anim.agents.models.infomax import JointDiscWithMutualInformationEncMLP
 from phys_anim.envs.humanoid.humanoid_utils import build_disc_action_observations, compute_humanoid_observations_max
 import math
+import numpy as np
 
 
 # def list_roll(inlist, n):
@@ -146,6 +148,7 @@ class IQL:
 
         print("Dataset Processing START")
         motion_libs = []
+        resets = []
         for m_file in self.config.dataset_files:
             motion_libs.append(StateActionLib(
                 motion_file=m_file,
@@ -154,11 +157,18 @@ class IQL:
                 key_body_ids=self.key_body_ids,
                 device=self.device,
             ))
+            motion_dir = os.path.dirname(m_file)
+            motion_name = os.path.splitext(os.path.basename(m_file))[0]
+            reset_file = motion_dir + "/" + motion_name + "_reset.npy"
+            reset = torch.Tensor(np.load(reset_file)).to(self.device)
+            resets.append(reset)
 
         print("Dataset Libs Loaded")
         self.data_subsets = []
         state = None
-        for lib in motion_libs:
+        for i in range(len(motion_libs)):
+            lib = motion_libs[i]
+            reset = resets[i]
             print(lib)
             lib_set = {}
             for motion_id in range(len(lib.state.motions)):
@@ -203,7 +213,8 @@ class IQL:
                         self.all_config.env.config.humanoid_obs.local_root_obs,
                         self.all_config.env.config.humanoid_obs.root_height_obs,
                         self.w_last,
-                    )
+                    ),
+                    "Reset": reset
                 }
             self.data_subsets.append(lib_set)
 
@@ -221,7 +232,8 @@ class IQL:
             "DiscrimObs": torch.zeros(motion_libs[0].actions.shape[0], self.discriminator_obs_size_per_step,
                                       device=self.device),
             "Actions": torch.zeros(motion_libs[0].actions.shape[0], self.num_act, device=self.device),
-            "HumanoidObservations": torch.zeros(motion_libs[0].actions.shape[0], self.num_obs, device=self.device)
+            "HumanoidObservations": torch.zeros(motion_libs[0].actions.shape[0], self.num_obs, device=self.device),
+            "Reset": torch.zeros(motion_libs[0].actions.shape[0], device=self.device)
         }
 
         self.dataset_len = motion_libs[0].actions.shape[0]
@@ -269,6 +281,7 @@ class IQL:
             self.dataset["DiscrimObs"][ds_strt_ind:ds_strt_ind + state_len] = state["DiscrimObs"]
             self.dataset["HumanoidObservations"][ds_strt_ind:ds_strt_ind + state_len] = state["HumanoidObservations"]
             self.dataset["Actions"][ds_strt_ind:ds_strt_ind + state_len] = state["Actions"]
+            self.dataset["Reset"][ds_strt_ind:ds_strt_ind + state_len] = state["Reset"]
             ds_strt_ind += state_len
 
     def dataset_roll(self):
@@ -295,6 +308,7 @@ class IQL:
         self.dataset["DiscrimObs"] = torch.roll(self.dataset["DiscrimObs"], shifts=-self.config.batch_size)
         self.dataset["HumanoidObservations"] = torch.roll(self.dataset["HumanoidObservations"],shifts=-self.config.batch_size)
         self.dataset["Actions"] = torch.roll(self.dataset["Actions"], shifts=-self.config.batch_size)
+        self.dataset["Reset"] = torch.roll(self.dataset["Reset"], shifts=-self.config.batch_size)
 
     def setup(self):
         actor: PPO_Actor = instantiate(
@@ -350,9 +364,9 @@ class IQL:
             discriminator, discriminator_optimizer
         )
 
-        #state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_1/last.ckpt", map_location=self.device)
-        #self.actor.load_state_dict(state_dict["actor"])
-        #self.save(name="last_a.ckpt")
+        state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_3/last.ckpt", map_location=self.device)
+        self.actor.load_state_dict(state_dict["actor"])
+        self.save(name="last_a.ckpt")
 
     def fit(self):
 
@@ -379,7 +393,8 @@ class IQL:
                         "latents": self.dataset["latents"][0:self.config.batch_size],
                         "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
                         "HumanoidObservations": self.dataset["HumanoidObservations"][0:self.config.batch_size],
-                        "Actions": self.dataset["Actions"][0:self.config.batch_size]
+                        "Actions": self.dataset["Actions"][0:self.config.batch_size],
+                        "Reset": self.dataset["Reset"][0:self.config.batch_size],
                     }
 
                     desc_r = self.calculate_discriminator_reward(batch["DiscrimObs"]).squeeze()#torch.ones(self.config.batch_size, device=self.device)
@@ -414,8 +429,7 @@ class IQL:
                     next_obs = torch.roll(batch["HumanoidObservations"], shifts=-1, dims=0)
                     next_latents = torch.roll(batch["latents"], shifts=-1, dims=0)
 
-                    q_target = reward + self.discount * self.critic_s(
-                        {"obs": next_obs, "latents": next_latents}).detach()
+                    q_target = reward + (1. - batch["Reset"]) * self.discount * self.critic_s({"obs": next_obs, "latents": next_latents}).detach()
                     q_target = q_target.detach()
                     q_pred = self.critic_sa({"obs": batch["HumanoidObservations"], "actions": batch["Actions"],
                                              "latents": batch["latents"]})

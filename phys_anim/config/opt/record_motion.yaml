@@ -14,4 +14,5 @@ env:
   config:
     export_motion: True
     export_action: True
+    export_reset: True
     env_num_to_export: 2

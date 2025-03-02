@@ -737,6 +737,11 @@ class BaseMimic(MimicHumanoid):  # type: ignore[misc]
                 self.motion_recording["actions"] = []
             self.motion_recording["actions"].append(self.actions[0:env_num_to_export].clone().cpu())
 
+        if self.config.get("export_reset", False):
+            if "reset" not in self.motion_recording:
+                self.motion_recording["reset"] = []
+            self.motion_recording["reset"].append(self.reset_buf[0:env_num_to_export].clone().cpu())
+
 
     def process_kb(self, gt: Tensor, gr: Tensor):
         kb = gt[:, self.key_body_ids]
