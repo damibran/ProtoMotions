@@ -1,0 +1,205 @@
+# @package _global_
+
+algo:
+  config:
+
+    dataset_files:
+      - output/recordings/000/RL_Avatar_Idle_Ready_Motion.npy
+      - output/recordings/001/RL_Avatar_Idle_Ready_Motion.npy
+
+    motion_file: output/recordings/IQL_seconddataset/sword_shield_state_action_0.yaml
+      #- output/recordings/IQL_seconddataset/sword_shield_state_action_1.yaml
+      #- output/recordings/IQL_seconddataset/sword_shield_state_action_2.yaml
+      #- output/recordings/IQL_seconddataset/sword_shield_state_action_3.yaml
+
+    models:
+      terrain_models:
+        mlp: null
+        transformer: null
+    # Setup discriminator structure
+    actor:
+      _target_: phys_anim.agents.models.actor.ActorFixedSigma
+      _recursive_: false
+      config:
+        initializer: default
+        mu_model:
+          _target_: phys_anim.agents.models.mlp.MultiHeadedMLP
+          _recursive_: false
+          config:
+            initializer: ${algo.config.actor.config.initializer}
+            units: [1024,512]
+            activation: ${algo.config.actor.config.activation}
+            normalize_obs: ${algo.config.normalize_obs}
+            obs_clamp_value: ${algo.config.obs_clamp_value}
+            use_layer_norm: ${algo.config.actor.config.use_layer_norm}
+            terrain_model: ${algo.config.models.terrain_models.mlp}
+            extra_inputs:
+              terrain: ${..terrain_model}
+              latents:
+                _target_: phys_anim.agents.models.mlp.MLP_WithNorm
+                config:
+                  initializer: ${algo.config.actor.config.initializer}
+                  units: [512, 256]
+                  activation: ${algo.config.actor.config.activation}
+                  use_layer_norm: ${algo.config.actor.config.use_layer_norm}
+                  normalize_obs: ${algo.config.normalize_obs}
+                  obs_clamp_value: ${algo.config.obs_clamp_value}
+                num_in: ${sum:${algo.config.infomax_parameters.latent_dim}}
+                num_out: ${.num_in}
+            latent_dim: ${algo.config.infomax_parameters.latent_dim}
+        init_logstd: -2.9
+        learnable_sigma: false
+        sigma_schedule: null
+        use_layer_norm: false
+        activation: relu
+
+    critic_s:
+      _target_: phys_anim.agents.models.critic.CriticMLP
+      _recursive_: False
+      config:
+        initializer: default
+        units: [ 1024, 512 ]
+        activation: relu
+        normalize_obs: ${algo.config.normalize_obs}
+        obs_clamp_value: ${algo.config.obs_clamp_value}
+        use_layer_norm: False
+        extra_inputs:
+          latents:
+            _target_: phys_anim.agents.models.common.Flatten
+            config:
+              normalize_obs: False
+              obs_clamp_value: ${algo.config.obs_clamp_value}
+            num_in: ${sum:${algo.config.infomax_parameters.latent_dim}}
+            num_out: ${.num_in}
+
+    critic_sa:
+      _target_: phys_anim.agents.models.critic.CriticMLP
+      _recursive_: False
+      config:
+        initializer: default
+        units: [ 1024, 512 ]
+        activation: relu
+        normalize_obs: ${algo.config.normalize_obs}
+        obs_clamp_value: ${algo.config.obs_clamp_value}
+        use_layer_norm: False
+        extra_inputs:
+          actions:
+            _target_: phys_anim.agents.models.common.Flatten
+            config:
+              normalize_obs: False
+              obs_clamp_value: ${algo.config.obs_clamp_value}
+            num_in: ${robot.number_of_actions}
+            num_out: ${.num_in}
+          latents:
+            _target_: phys_anim.agents.models.common.Flatten
+            config:
+              normalize_obs: False
+              obs_clamp_value: ${algo.config.obs_clamp_value}
+            num_in: ${sum:${algo.config.infomax_parameters.latent_dim}}
+            num_out: ${.num_in}
+
+    discriminator:
+      _target_: phys_anim.agents.models.mlp.MultiHeadedMLP
+      _recursive_: false
+      config:
+        initializer: default
+        units: [ 1024, 1024, 512 ]
+        discriminator_obs_historical_steps: ${env.config.discriminator_obs_historical_steps}
+        activation: relu
+        normalize_obs: ${algo.config.normalize_obs}
+        obs_clamp_value: ${algo.config.obs_clamp_value}
+        use_layer_norm: false
+        extra_inputs:
+          latents:
+            _target_: phys_anim.agents.models.common.Flatten
+            config:
+              normalize_obs: False
+              obs_clamp_value: ${algo.config.obs_clamp_value}
+            num_in: ${sum:${algo.config.infomax_parameters.latent_dim}}
+            num_out: ${.num_in}
+        latent_dim: ${algo.config.infomax_parameters.latent_dim}
+
+    encoder:
+      _target_: phys_anim.agents.models.mlp.MLP_WithNorm
+      _recursive_: false
+      config:
+        initializer: default
+        units: [ 1024, 1024, 512 ]
+        discriminator_obs_historical_steps: ${env.config.discriminator_obs_historical_steps}
+        activation: relu
+        normalize_obs: ${algo.config.normalize_obs}
+        obs_clamp_value: ${algo.config.obs_clamp_value}
+        use_layer_norm: false
+        extra_inputs: null
+        latent_dim: ${algo.config.infomax_parameters.latent_dim}
+
+    actor_optimizer:
+      _target_: torch.optim.Adam
+      lr: 2e-5
+      betas: [0.9, 0.999]
+
+    critic_optimizer:
+      _target_: torch.optim.Adam
+      lr: 1e-4
+      betas: [0.9, 0.999]
+
+    discriminator_optimizer:
+      _target_: torch.optim.Adam
+      lr: 1e-4
+      betas: [ 0.9, 0.999 ]
+
+    actor_lr_scheduler: null
+    critic_lr_scheduler: null
+
+    # ASE parameters
+    infomax_parameters:
+      latent_dim: [ 64 ]
+      latent_types: [ hypersphere ]
+
+      mi_reward_w: [ 0.5 ]
+      mi_hypersphere_reward_shift: True
+
+      mi_enc_weight_decay: 0
+      mi_enc_grad_penalty: 0
+
+      diversity_tar: 1.
+      diversity_bonus: 0.01
+
+      random_latents: True
+      latent_steps_min: 1
+      latent_steps_max: 150
+
+    #IQL parameters
+    expectile: 0.9
+    alpha: 0.5
+    batch_size: 1024
+    max_epochs: 28000
+    normalize_obs: True
+    obs_clamp_value: null
+    discriminator_reward_w: 2.0
+    discriminator_grad_penalty: 5
+    discriminator_weight_decay: 0.0001
+    discriminator_logit_weight_decay: 0.01
+    discount: 0.9
+    beta: 3 # aka temperatue
+
+    eval_callbacks: null
+
+    extra_inputs: null
+
+env:
+  config:
+    # Simulation params
+    ## Observations
+    humanoid_obs:
+      use_max_coords_obs: True
+      local_root_obs: True
+      root_height_obs: True
+
+    discriminator_obs_historical_steps: 1
+    disable_discriminator: False
+    discriminator_obs_size_per_step: ${eval:13+2*${robot.dof_obs_size}+${robot.number_of_actions}+3*${robot.num_key_bodies}}
+
+    ## Motion-related params
+    ### Respawn related params
+    state_init: Random

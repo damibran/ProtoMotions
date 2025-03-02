@@ -7,13 +7,15 @@ from torch import nn as nn
 from torch import Tensor
 from isaac_utils import torch_utils
 from lightning.fabric import Fabric
+from utils.motion_lib import MotionLib
 from utils.StateActionLib import StateActionLib, MotionStateAction
 from phys_anim.agents.models.actor import PPO_Actor
 from hydra.utils import instantiate
 from phys_anim.agents.models.common import NormObsBase
 from phys_anim.envs.env_utils.general import StepTracker
 from phys_anim.agents.models.infomax import JointDiscWithMutualInformationEncMLP
-from phys_anim.envs.humanoid.humanoid_utils import build_disc_action_observations, compute_humanoid_observations_max
+from phys_anim.agents.models.mlp import MultiHeadedMLP, MLP_WithNorm
+from phys_anim.envs.humanoid.humanoid_utils import build_disc_observations,build_disc_action_observations, compute_humanoid_observations_max
 import math
 import numpy as np
 
@@ -22,7 +24,7 @@ import numpy as np
 #    for i in range(n):
 #        inlist.append(inlist.pop(0))
 
-class IQL:
+class IQL_Calm:
 
     def __init__(self, fabric: Fabric, config):
         self.all_config = config
@@ -65,86 +67,76 @@ class IQL:
         )
 
         print("Demo Dataset Processing START")
-        motion_libs = []
-        for m_file in self.config.motion_files:
-            motion_libs.append(StateActionLib(
-                motion_file=m_file,
-                dof_body_ids=self.dof_body_ids,
-                dof_offsets=self.dof_offsets,
-                key_body_ids=self.key_body_ids,
-                device=self.device,
-            ))
+
+        demo_motion_lib = MotionLib(
+            motion_file=self.config.motion_file,
+            dof_body_ids=self.dof_body_ids,
+            dof_offsets=self.dof_offsets,
+            key_body_ids=self.key_body_ids,
+            device=self.device,
+        )
 
         print("Demo Dataset Libs Loaded")
-        self.demo_subsets = []
-        state = None
-        for lib in motion_libs:
-            print(lib)
-            lib_set = {}
-            for motion_id in range(len(lib.state.motions)):
-                motion_len = lib.get_motion_length(motion_id)
-                dt = lib.get_motion(motion_id).time_delta
+        self.demo_data = {}
+        for motion_id in range(len(demo_motion_lib.state.motions)):
+            motion_len = demo_motion_lib.get_motion_length(motion_id)
+            dt = demo_motion_lib.get_motion(motion_id).time_delta
 
-                motion_times = torch.arange(0, motion_len, dt, device=self.device)
-                state = lib.get_motion_state(motion_id, motion_times)
+            motion_times = torch.arange(0, motion_len, dt, device=self.device)
+            state = demo_motion_lib.get_motion_state(motion_id, motion_times)
 
-                lib_set[motion_id] = {
-                    "root_pos": state.root_pos,
-                    "root_rot": state.root_rot,
-                    "root_vel": state.root_vel,
-                    "root_ang_vel": state.root_ang_vel,
-                    "dof_pos": state.dof_pos,
-                    "dof_vel": state.dof_vel,
-                    "key_body_pos": state.key_body_pos,
-                    "Actions": state.action,
-                    "DiscrimObs": build_disc_action_observations(
-                        state.root_pos,
-                        state.root_rot,
-                        state.root_vel,
-                        state.root_ang_vel,
-                        state.dof_pos,
-                        state.dof_vel,
-                        state.key_body_pos,
-                        torch.zeros(1, device=self.device),
-                        state.action,
-                        self.all_config.env.config.humanoid_obs.local_root_obs,
-                        self.all_config.env.config.humanoid_obs.root_height_obs,
-                        self.all_config.robot.dof_obs_size,
-                        self.dof_offsets,
-                        False,
-                        self.w_last,
-                    ),
-                    "HumanoidObservations": compute_humanoid_observations_max(
-                        state.rb_pos,
-                        state.rb_rot,
-                        state.rb_vel,
-                        state.rb_ang_vel,
-                        torch.zeros(1, device=self.device),
-                        self.all_config.env.config.humanoid_obs.local_root_obs,
-                        self.all_config.env.config.humanoid_obs.root_height_obs,
-                        self.w_last,
-                    )
-                }
-            self.demo_subsets.append(lib_set)
+            self.demo_data[motion_id] = {
+                "root_pos": state.root_pos,
+                "root_rot": state.root_rot,
+                "root_vel": state.root_vel,
+                "root_ang_vel": state.root_ang_vel,
+                "dof_pos": state.dof_pos,
+                "dof_vel": state.dof_vel,
+                "key_body_pos": state.key_body_pos,
+                "DiscrimObs": build_disc_observations(
+                    state.root_pos,
+                    state.root_rot,
+                    state.root_vel,
+                    state.root_ang_vel,
+                    state.dof_pos,
+                    state.dof_vel,
+                    state.key_body_pos,
+                    torch.zeros(1, device=self.device),
+                    self.all_config.env.config.humanoid_obs.local_root_obs,
+                    self.all_config.env.config.humanoid_obs.root_height_obs,
+                    self.all_config.robot.dof_obs_size,
+                    self.dof_offsets,
+                    False,
+                    self.w_last,
+                ),
+                "HumanoidObservations": compute_humanoid_observations_max(
+                    state.rb_pos,
+                    state.rb_rot,
+                    state.rb_vel,
+                    state.rb_ang_vel,
+                    torch.zeros(1, device=self.device),
+                    self.all_config.env.config.humanoid_obs.local_root_obs,
+                    self.all_config.env.config.humanoid_obs.root_height_obs,
+                    self.w_last,
+                )
+            }
 
-        print("Demo Dataset Creating")
-        self.demo_dataset = {
-            "root_pos": torch.zeros(motion_libs[0].actions.shape[0], state.root_pos.shape[1], device=self.device),
-            "root_rot": torch.zeros(motion_libs[0].actions.shape[0], state.root_rot.shape[1], device=self.device),
-            "root_vel": torch.zeros(motion_libs[0].actions.shape[0], state.root_vel.shape[1], device=self.device),
-            "root_ang_vel": torch.zeros(motion_libs[0].actions.shape[0], state.root_ang_vel.shape[1],
-                                        device=self.device),
-            "dof_pos": torch.zeros(motion_libs[0].actions.shape[0], state.dof_pos.shape[1], device=self.device),
-            "dof_vel": torch.zeros(motion_libs[0].actions.shape[0], state.dof_vel.shape[1], device=self.device),
-            "key_body_pos": torch.zeros(motion_libs[0].actions.shape[0], state.key_body_pos.shape[1],
-                                        state.key_body_pos.shape[2], device=self.device),
-            "DiscrimObs": torch.zeros(motion_libs[0].actions.shape[0], self.discriminator_obs_size_per_step,
-                                      device=self.device),
-            "Actions": torch.zeros(motion_libs[0].actions.shape[0], self.num_act, device=self.device),
-            "HumanoidObservations": torch.zeros(motion_libs[0].actions.shape[0], self.num_obs, device=self.device)
-        }
-
-        self.demo_dataset_len = motion_libs[0].actions.shape[0]
+        #print("Demo Dataset Creating")
+        #self.demo_dataset = {
+        #    "root_pos": torch.zeros(motion_libs[0].actions.shape[0], state.root_pos.shape[1], device=self.device),
+        #    "root_rot": torch.zeros(motion_libs[0].actions.shape[0], state.root_rot.shape[1], device=self.device),
+        #    "root_vel": torch.zeros(motion_libs[0].actions.shape[0], state.root_vel.shape[1], device=self.device),
+        #    "root_ang_vel": torch.zeros(motion_libs[0].actions.shape[0], state.root_ang_vel.shape[1],
+        #                                device=self.device),
+        #    "dof_pos": torch.zeros(motion_libs[0].actions.shape[0], state.dof_pos.shape[1], device=self.device),
+        #    "dof_vel": torch.zeros(motion_libs[0].actions.shape[0], state.dof_vel.shape[1], device=self.device),
+        #    "key_body_pos": torch.zeros(motion_libs[0].actions.shape[0], state.key_body_pos.shape[1],
+        #                                state.key_body_pos.shape[2], device=self.device),
+        #    "DiscrimObs": torch.zeros(motion_libs[0].actions.shape[0], self.discriminator_obs_size_per_step,
+        #                              device=self.device),
+        #    "Actions": torch.zeros(motion_libs[0].actions.shape[0], self.num_act, device=self.device),
+        #    "HumanoidObservations": torch.zeros(motion_libs[0].actions.shape[0], self.num_obs, device=self.device)
+        #}
 
         print("Dataset Processing START")
         motion_libs = []
@@ -243,25 +235,25 @@ class IQL:
         pass
 
     def fill_dataset(self):
-        subset_ind = random.randint(0, len(self.demo_subsets)-1)
-        motion_ids = list(self.demo_subsets[subset_ind].keys())
-        ds_strt_ind = 0
-        while len(motion_ids) > 0:
-            motion_id = random.choice(motion_ids)
-            motion_ids.remove(motion_id)
-            state = self.demo_subsets[subset_ind][motion_id]
-            state_len = state["root_pos"].shape[0]
-            self.demo_dataset["root_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["root_pos"]
-            self.demo_dataset["root_rot"][ds_strt_ind:ds_strt_ind + state_len] = state["root_rot"]
-            self.demo_dataset["root_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["root_vel"]
-            self.demo_dataset["root_ang_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["root_ang_vel"]
-            self.demo_dataset["dof_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_pos"]
-            self.demo_dataset["dof_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_vel"]
-            self.demo_dataset["key_body_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["key_body_pos"]
-            self.demo_dataset["DiscrimObs"][ds_strt_ind:ds_strt_ind + state_len] = state["DiscrimObs"]
-            self.demo_dataset["HumanoidObservations"][ds_strt_ind:ds_strt_ind + state_len] = state["HumanoidObservations"]
-            self.demo_dataset["Actions"][ds_strt_ind:ds_strt_ind + state_len] = state["Actions"]
-            ds_strt_ind += state_len
+        #subset_ind = random.randint(0, len(self.demo_subsets)-1)
+        #motion_ids = list(self.demo_subsets[subset_ind].keys())
+        #ds_strt_ind = 0
+        #while len(motion_ids) > 0:
+        #    motion_id = random.choice(motion_ids)
+        #    motion_ids.remove(motion_id)
+        #    state = self.demo_subsets[subset_ind][motion_id]
+        #    state_len = state["root_pos"].shape[0]
+        #    self.demo_dataset["root_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["root_pos"]
+        #    self.demo_dataset["root_rot"][ds_strt_ind:ds_strt_ind + state_len] = state["root_rot"]
+        #    self.demo_dataset["root_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["root_vel"]
+        #    self.demo_dataset["root_ang_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["root_ang_vel"]
+        #    self.demo_dataset["dof_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_pos"]
+        #    self.demo_dataset["dof_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_vel"]
+        #    self.demo_dataset["key_body_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["key_body_pos"]
+        #    self.demo_dataset["DiscrimObs"][ds_strt_ind:ds_strt_ind + state_len] = state["DiscrimObs"]
+        #    self.demo_dataset["HumanoidObservations"][ds_strt_ind:ds_strt_ind + state_len] = state["HumanoidObservations"]
+        #    self.demo_dataset["Actions"][ds_strt_ind:ds_strt_ind + state_len] = state["Actions"]
+        #    ds_strt_ind += state_len
 
         subset_ind = random.randint(0, len(self.data_subsets)-1)
         motion_ids = list(self.data_subsets[subset_ind].keys())
@@ -286,16 +278,16 @@ class IQL:
 
     def dataset_roll(self):
 
-        self.demo_dataset["root_pos"] = torch.roll(self.demo_dataset["root_pos"], shifts=-self.config.batch_size)
-        self.demo_dataset["root_rot"] = torch.roll(self.demo_dataset["root_rot"], shifts=-self.config.batch_size)
-        self.demo_dataset["root_vel"] = torch.roll(self.demo_dataset["root_vel"], shifts=-self.config.batch_size)
-        self.demo_dataset["root_ang_vel"] = torch.roll(self.demo_dataset["root_ang_vel"], shifts=-self.config.batch_size)
-        self.demo_dataset["dof_pos"] = torch.roll(self.demo_dataset["dof_pos"], shifts=-self.config.batch_size)
-        self.demo_dataset["dof_vel"] = torch.roll(self.demo_dataset["dof_vel"], shifts=-self.config.batch_size)
-        self.demo_dataset["key_body_pos"] = torch.roll(self.demo_dataset["key_body_pos"], shifts=-self.config.batch_size)
-        self.demo_dataset["DiscrimObs"] = torch.roll(self.demo_dataset["DiscrimObs"], shifts=-self.config.batch_size)
-        self.demo_dataset["HumanoidObservations"] = torch.roll(self.demo_dataset["HumanoidObservations"], shifts=-self.config.batch_size)
-        self.demo_dataset["Actions"] = torch.roll(self.demo_dataset["Actions"], shifts=-self.config.batch_size)
+        #self.demo_dataset["root_pos"] = torch.roll(self.demo_dataset["root_pos"], shifts=-self.config.batch_size)
+        #self.demo_dataset["root_rot"] = torch.roll(self.demo_dataset["root_rot"], shifts=-self.config.batch_size)
+        #self.demo_dataset["root_vel"] = torch.roll(self.demo_dataset["root_vel"], shifts=-self.config.batch_size)
+        #self.demo_dataset["root_ang_vel"] = torch.roll(self.demo_dataset["root_ang_vel"], shifts=-self.config.batch_size)
+        #self.demo_dataset["dof_pos"] = torch.roll(self.demo_dataset["dof_pos"], shifts=-self.config.batch_size)
+        #self.demo_dataset["dof_vel"] = torch.roll(self.demo_dataset["dof_vel"], shifts=-self.config.batch_size)
+        #self.demo_dataset["key_body_pos"] = torch.roll(self.demo_dataset["key_body_pos"], shifts=-self.config.batch_size)
+        #self.demo_dataset["DiscrimObs"] = torch.roll(self.demo_dataset["DiscrimObs"], shifts=-self.config.batch_size)
+        #self.demo_dataset["HumanoidObservations"] = torch.roll(self.demo_dataset["HumanoidObservations"], shifts=-self.config.batch_size)
+        #self.demo_dataset["Actions"] = torch.roll(self.demo_dataset["Actions"], shifts=-self.config.batch_size)
 
         self.dataset["latents"] = torch.roll(self.dataset["latents"], shifts=-self.config.batch_size)
         self.dataset["root_pos"] = torch.roll(self.dataset["root_pos"], shifts=-self.config.batch_size)
@@ -350,10 +342,11 @@ class IQL:
 
         self.target_critic = self.fabric.setup(target_critic)
 
-        discriminator: JointDiscWithMutualInformationEncMLP = instantiate(
+        discriminator: MultiHeadedMLP = instantiate(
             self.config.discriminator,
             num_in=self.discriminator_obs_size_per_step
                    * self.all_config.env.config.discriminator_obs_historical_steps,
+            num_out=1
         )
         discriminator_optimizer = instantiate(
             self.config.discriminator_optimizer,
@@ -362,6 +355,21 @@ class IQL:
 
         self.discriminator, self.discriminator_optimizer = self.fabric.setup(
             discriminator, discriminator_optimizer
+        )
+
+        encoder: MLP_WithNorm = instantiate(
+            self.config.encoder,
+            num_in=self.discriminator_obs_size_per_step
+                   * 60,
+            num_out=sum(self.config.infomax_parameters.latent_dim)
+        )
+        encoder_optimizer = instantiate(
+            self.config.discriminator_optimizer,
+            params=discriminator.parameters(),
+        )
+
+        self.encoder, self.encoder_optimizer = self.fabric.setup(
+            encoder, encoder_optimizer
         )
 
         #state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_3/last.ckpt", map_location=self.device)
@@ -375,7 +383,7 @@ class IQL:
             batch_count = math.ceil(self.dataset_len / self.config.batch_size)
 
             self.fill_dataset()
-            self.dataset["latents"] = self.sample_latent(self.dataset_len)
+            self.dataset["latents"] = self.sample_latents(self.dataset_len)
 
             print(f'Value Step')
 
@@ -595,141 +603,15 @@ class IQL:
             if self.current_epoch % 10 == 0:
                 self.save()
 
-    def sample_latent(self, n):
-        latents = torch.zeros(
-            [n, sum(self.config.infomax_parameters.latent_dim)], device=self.device
-        )
+    def sample_latents(self, n):
+        motion_ids = np.random.choice(np.array(list(self.demo_data.keys())), n)
 
-        start = 0
-        for idx, dim in enumerate(self.config.infomax_parameters.latent_dim):
-            if self.config.infomax_parameters.latent_types[idx] == "gaussian":
-                gaussian_sample = torch.normal(latents[:, start: start + dim])
-                latents[:, start: start + dim] = gaussian_sample
+        for m_id in motion_ids:
+            len = self.demo_data[m_id]["root_pos"].shape[0]
+            pass
 
-            elif self.config.infomax_parameters.latent_types[idx] == "hypersphere":
-                gaussian_sample = torch.normal(latents[:, start: start + dim])
-                projected_gaussian_sample = torch.nn.functional.normalize(
-                    gaussian_sample, dim=-1
-                )
-                latents[:, start: start + dim] = projected_gaussian_sample
+        return None
 
-            elif self.config.infomax_parameters.latent_types[idx] == "uniform":
-                uniform_sample = torch.rand([n, dim], device=self.device)
-                latents[:, start: start + dim] = uniform_sample
-
-            elif self.config.infomax_parameters.latent_types[idx] == "categorical":
-                categorical_sample = torch.multinomial(
-                    latents[0, start: start + dim] + 1.0,
-                    num_samples=n,
-                    replacement=True,
-                )
-                b = torch.arange(n, device=self.device)
-                latents[b, categorical_sample + start] = categorical_sample
-            else:
-                raise NotImplementedError
-
-            start += dim
-
-        return latents
-
-    # aka calculate diversity_loss
-    def calculate_extra_actor_loss(self, batch_dict, eval=False) -> Tuple[Tensor, Dict]:
-        extra_loss, extra_actor_log_dict = torch.tensor(0.0, device=self.device), {}
-
-        if self.config.infomax_parameters.diversity_bonus <= 0:
-            return extra_loss, extra_actor_log_dict
-
-        diversity_loss = self.diversity_loss(batch_dict, eval)
-
-        extra_actor_log_dict["actor/diversity_loss"] = diversity_loss.detach()
-
-        return (
-            extra_loss
-            + diversity_loss * self.config.infomax_parameters.diversity_bonus,
-            extra_actor_log_dict,
-        )
-
-    def diversity_loss(self, batch_dict, eval=False):
-        prev_latents = batch_dict["latents"]
-        new_latents = (self.sample_latent(batch_dict["obs"].shape[0]))
-        batch_dict["latents"] = new_latents
-        if not eval:
-            new_outs = self.actor.training_forward(batch_dict)
-        else:
-            new_outs = self.actor.eval_forward(batch_dict)
-
-        batch_dict["latents"] = prev_latents
-        if not eval:
-            old_outs = self.actor.training_forward(batch_dict)
-        else:
-            old_outs = self.actor.eval_forward(batch_dict)
-
-        clipped_new_mu = torch.clamp(new_outs["mus"], -1.0, 1.0)
-        clipped_old_mu = torch.clamp(old_outs["mus"], -1.0, 1.0)
-
-        mu_diff = clipped_new_mu - clipped_old_mu
-        mu_diff = torch.mean(torch.square(mu_diff), dim=-1)
-
-        z_diff = new_latents * prev_latents
-        z_diff = torch.sum(z_diff, dim=-1)
-        z_diff = 0.5 - 0.5 * z_diff
-
-        diversity_bonus = mu_diff / (z_diff + 1e-5)
-        diversity_loss = torch.square(
-            self.config.infomax_parameters.diversity_tar - diversity_bonus
-        ).mean()
-
-        return diversity_loss
-
-    def mi_enc_forward(self, obs: Tensor) -> Tensor:
-        args = {"obs": obs}
-        return self.discriminator(args, return_enc=True)
-
-    def calc_mi_reward(self, discriminator_obs, latents):
-        """
-        TODO: calculate reward for each distribution type
-            Gaussian -- MSE (we assume variance 1)
-            Hypersphere -- von Mises-Fisher
-            Uniform -- MSE
-            Categorical -- torch.nn.functional.cross_entropy()
-        """
-        mi_r = torch.zeros(self.config.batch_size, device=self.device)
-
-        enc_pred = self.mi_enc_forward(discriminator_obs)
-        cumulative_enc_dim = 0
-        cumulative_latent_dim = 0
-        for idx, latent_dim in enumerate(self.config.infomax_parameters.latent_dim):
-            if self.config.infomax_parameters.latent_types[idx] == "hypersphere":
-                r = self.von_mises_fisher_reward(
-                    enc_pred[..., cumulative_enc_dim: cumulative_enc_dim + latent_dim],
-                    latents[
-                    ..., cumulative_latent_dim: cumulative_latent_dim + latent_dim
-                    ],
-                )
-
-                cumulative_latent_dim += latent_dim
-                cumulative_enc_dim += latent_dim
-            else:
-                raise NotImplementedError
-
-            r = r.squeeze(1)
-
-            mi_r += r * self.config.infomax_parameters.mi_reward_w[idx]
-
-        return mi_r / len(self.config.infomax_parameters.latent_dim)
-
-    def von_mises_fisher_reward(self, enc_prediction, latents):
-        neg_err = -self.calc_von_mises_fisher_enc_error(enc_prediction, latents)
-        if self.config.infomax_parameters.mi_hypersphere_reward_shift:
-            mi_r = (neg_err + 1) / 2
-        else:
-            mi_r = torch.clamp_min(neg_err, 0.0)
-        return mi_r
-
-    def calc_von_mises_fisher_enc_error(self, enc_pred, latent):
-        err = enc_pred * latent
-        err = -torch.sum(err, dim=-1, keepdim=True)
-        return err
 
     def setup_character_props(self):
         self.dof_body_ids = self.all_config.robot.dfs_dof_body_ids
@@ -755,195 +637,6 @@ class IQL:
 
         body_ids = torch_utils.to_torch(body_ids, device=self.device, dtype=torch.long)
         return body_ids
-
-    def discriminator_forward(self, obs: Tensor, return_norm_obs=False) -> Tensor:
-        args = {"obs": obs}
-        return self.discriminator(args, return_norm_obs=return_norm_obs)
-
-    def calculate_discriminator_reward(self, discriminator_obs: Tensor) -> Tensor:
-        disc_logits = self.discriminator_forward(discriminator_obs)
-
-        prob = 1 / (1 + torch.exp(-disc_logits))
-        disc_r = (
-                -torch.log(
-                    torch.maximum(1 - prob, torch.tensor(0.0001, device=self.device))
-                )
-                * self.config.discriminator_reward_w
-        )
-        return disc_r
-
-    # batch:{
-    #   "AgentDiscObs"
-    #   "DemoDiscObs"
-    # }
-    def discriminator_step(self, batch):
-        discriminator_loss, discriminator_log_dict = self.compute_discriminator_loss(
-            batch
-        )
-
-        discriminator_log_dict = {
-            f"jd/{k}": v for k, v in discriminator_log_dict.items()
-        }
-
-        return discriminator_loss, discriminator_log_dict
-
-    def compute_discriminator_loss(self, batch):
-        (
-            agent_obs,
-            demo_obs,
-        ) = batch["AgentDiscObs"], batch["DemoDiscObs"]
-
-        demo_obs.requires_grad_(True)
-
-        agent_logits = self.discriminator_forward(obs=agent_obs)
-
-        demo_dict = self.discriminator_forward(obs=demo_obs, return_norm_obs=True)
-        demo_logits = demo_dict["outs"]
-        demo_norm_obs = demo_dict["norm_obs"]
-
-        pos_loss = self.disc_loss_pos(demo_logits)
-        agent_loss = self.disc_loss_neg(agent_logits)
-
-        neg_loss = agent_loss
-
-        class_loss = 0.5 * (pos_loss + neg_loss)
-
-        pos_acc = self.compute_pos_acc(demo_logits)
-        agent_acc = self.compute_neg_acc(agent_logits)
-
-        neg_acc = agent_acc
-
-        # grad penalty
-        disc_demo_grad = torch.autograd.grad(
-            demo_logits,
-            demo_norm_obs,
-            grad_outputs=torch.ones_like(demo_logits),
-            create_graph=True,
-            retain_graph=True,
-            only_inputs=True,
-        )[0]
-        disc_demo_grad_norm = torch.sum(torch.square(disc_demo_grad), dim=-1)
-        disc_grad_penalty = torch.mean(disc_demo_grad_norm)
-        grad_loss: Tensor = self.config.discriminator_grad_penalty * disc_grad_penalty
-
-        if self.config.discriminator_weight_decay > 0:
-            all_weight_params = self.discriminator.all_discriminator_weights()
-            total: Tensor = sum([p.pow(2).sum() for p in all_weight_params])
-            weight_decay_loss: Tensor = total * self.config.discriminator_weight_decay
-        else:
-            weight_decay_loss = torch.tensor(0.0, device=self.device)
-            total = torch.tensor(0.0, device=self.device)
-
-        if self.config.discriminator_logit_weight_decay > 0:
-            logit_params = self.discriminator.logit_weights()
-            logit_total = sum([p.pow(2).sum() for p in logit_params])
-
-            logit_weight_decay_loss: Tensor = (
-                    logit_total * self.config.discriminator_logit_weight_decay
-            )
-        else:
-            logit_weight_decay_loss = torch.tensor(0.0, device=self.device)
-            logit_total = torch.tensor(0.0, device=self.device)
-
-        loss = grad_loss + class_loss + weight_decay_loss + logit_weight_decay_loss
-
-        log_dict = {
-            "loss": loss.detach(),
-            "pos_acc": pos_acc.detach(),
-            "agent_acc": agent_acc.detach(),
-            "neg_acc": neg_acc.detach(),
-            "grad_penalty": disc_grad_penalty.detach(),
-            "grad_loss": grad_loss.detach(),
-            "class_loss": class_loss.detach(),
-            "l2_logit_total": logit_total.detach(),
-            "l2_logit_loss": logit_weight_decay_loss.detach(),
-            "l2_total": total.detach(),
-            "l2_loss": weight_decay_loss.detach(),
-            "demo_logit_mean": demo_logits.detach().mean(),
-            "agent_logit_mean": agent_logits.detach().mean(),
-        }
-
-        log_dict["negative_logit_mean"] = log_dict["agent_logit_mean"]
-
-        return loss, log_dict
-
-    # batch:{
-    #   "AgentDiscObs"
-    #   "DemoDiscObs"
-    #   "latents"
-    # }
-    def encoder_step(self, batch) -> Tuple[Tensor, Dict]:
-        discriminator_loss, discriminator_log_dict = self.discriminator_step(batch)
-
-        obs = batch["AgentDiscObs"]
-        latents = batch["latents"]
-        if self.config.infomax_parameters.mi_enc_grad_penalty > 0:
-            obs.requires_grad_(True)
-
-        mi_enc_pred = self.mi_enc_forward(obs)
-
-        mi_enc_err = self.calc_mi_enc_error(mi_enc_pred, latents)
-
-        mi_enc_loss = torch.mean(mi_enc_err)
-
-        if self.config.infomax_parameters.mi_enc_weight_decay > 0:
-            enc_weight_params = self.discriminator.enc_weights()
-            total: Tensor = sum([p.pow(2).sum() for p in enc_weight_params])
-            weight_decay_loss: Tensor = (
-                    total * self.config.infomax_parameters.mi_enc_weight_decay
-            )
-        else:
-            weight_decay_loss = torch.tensor(0.0, device=self.device)
-
-        if self.config.infomax_parameters.mi_enc_grad_penalty > 0:
-            mi_enc_obs_grad = torch.autograd.grad(
-                mi_enc_err,
-                obs,
-                grad_outputs=torch.ones_like(mi_enc_err),
-                create_graph=True,
-                retain_graph=True,
-            )
-
-            mi_enc_obs_grad = mi_enc_obs_grad[0]
-            mi_enc_obs_grad = torch.sum(torch.square(mi_enc_obs_grad), dim=-1)
-            mi_enc_grad_penalty = torch.mean(mi_enc_obs_grad)
-
-            grad_loss: Tensor = mi_enc_grad_penalty * self.config.infomax_parameters.mi_enc_grad_penalty
-        else:
-            grad_loss = torch.tensor(0.0, device=self.device)
-
-        mi_loss = mi_enc_loss + weight_decay_loss + grad_loss
-
-        log_dict = {
-            "loss": mi_loss.detach(),
-            "l2_loss": weight_decay_loss.detach(),
-            "grad_penalty": grad_loss.detach(),
-        }
-
-        mi_enc_log_dict = {f"mi_enc/{k}": v for k, v in log_dict.items()}
-
-        discriminator_log_dict.update(mi_enc_log_dict)
-
-        return mi_loss + discriminator_loss, discriminator_log_dict
-
-    def calc_mi_enc_error(self, enc_pred, latents):
-        cumulative_enc_dim = 0
-        cumulative_latent_dim = 0
-
-        total_error = []
-
-        for idx, latent_dim in enumerate(self.config.infomax_parameters.latent_dim):
-            if self.config.infomax_parameters.latent_types[idx] == "hypersphere":
-                err = self.calc_von_mises_fisher_enc_error(enc_pred, latents)
-
-                cumulative_latent_dim += latent_dim
-                cumulative_enc_dim += latent_dim
-            else:
-                raise NotImplementedError
-
-            total_error.append(err)
-
-        return torch.cat(total_error, dim=-1)
 
     def get_state_dict(self, state_dict):
         extra_state_dict = {
