@@ -309,12 +309,12 @@ def compute_humanoid_observations_max(
         dim=-1,
     )
 
-    #torch.set_printoptions(threshold=10000)
-    #print(f'root_h_obs:{root_h_obs}')
-    #print(f'local_body_pos:{local_body_pos}')
-    #print(f'local_body_rot_obs:{local_body_rot_obs}')
-    #print(f'local_body_vel:{local_body_vel}')
-    #print(f'local_body_ang_vel:{local_body_ang_vel}')
+   #torch.set_printoptions(threshold=10000)
+   #print(f'root_h_obs:{root_h_obs}')
+   #print(f'local_body_pos:{local_body_pos}')
+   #print(f'local_body_rot_obs:{local_body_rot_obs}')
+   #print(f'local_body_vel:{local_body_vel}')
+   #print(f'local_body_ang_vel:{local_body_ang_vel}')
 
     return obs
 

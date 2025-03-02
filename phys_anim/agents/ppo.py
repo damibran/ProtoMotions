@@ -494,6 +494,8 @@ class PPO:
         # (unless overriden in callbacks).
         actor_state["actions"] = actor_state["mus"]
 
+        #print(actor_state["actions"])
+
         for c in self.eval_callbacks:
             actor_state = c.on_pre_eval_env_step(actor_state)
 
