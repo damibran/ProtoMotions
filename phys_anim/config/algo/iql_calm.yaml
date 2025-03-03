@@ -99,7 +99,7 @@ algo:
             num_out: ${.num_in}
 
     discriminator:
-      _target_: phys_anim.agents.models.mlp.MultiHeadedMLP
+      _target_: phys_anim.agents.models.discriminator.JointDiscMLP
       _recursive_: false
       config:
         initializer: default
@@ -187,6 +187,8 @@ algo:
 
     extra_inputs: null
 
+    num_obs_enc_steps: 60
+
 env:
   config:
     # Simulation params
@@ -198,7 +200,7 @@ env:
 
     discriminator_obs_historical_steps: 1
     disable_discriminator: False
-    discriminator_obs_size_per_step: ${eval:13+2*${robot.dof_obs_size}+${robot.number_of_actions}+3*${robot.num_key_bodies}}
+    discriminator_obs_size_per_step: ${eval:13+${robot.dof_obs_size}+${robot.number_of_actions}+3*${robot.num_key_bodies}}
 
     ## Motion-related params
     ### Respawn related params

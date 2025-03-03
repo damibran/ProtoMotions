@@ -5,6 +5,8 @@ from typing import List, Tuple, Dict
 import torch
 from torch import nn as nn
 from torch import Tensor
+from torch.cuda import device
+
 from isaac_utils import torch_utils
 from lightning.fabric import Fabric
 from utils.motion_lib import MotionLib
@@ -15,6 +17,7 @@ from phys_anim.agents.models.common import NormObsBase
 from phys_anim.envs.env_utils.general import StepTracker
 from phys_anim.agents.models.infomax import JointDiscWithMutualInformationEncMLP
 from phys_anim.agents.models.mlp import MultiHeadedMLP, MLP_WithNorm
+from phys_anim.agents.models.discriminator import JointDiscMLP
 from phys_anim.envs.humanoid.humanoid_utils import build_disc_observations,build_disc_action_observations, compute_humanoid_observations_max
 import math
 import numpy as np
@@ -81,6 +84,10 @@ class IQL_Calm:
         for motion_id in range(len(demo_motion_lib.state.motions)):
             motion_len = demo_motion_lib.get_motion_length(motion_id)
             dt = demo_motion_lib.get_motion(motion_id).time_delta
+
+            if motion_len < 2.:
+                print(f'skipped {demo_motion_lib.state.motion_files[motion_id]} with length {motion_len}')
+                continue
 
             motion_times = torch.arange(0, motion_len, dt, device=self.device)
             state = demo_motion_lib.get_motion_state(motion_id, motion_times)
@@ -270,7 +277,6 @@ class IQL_Calm:
             self.dataset["dof_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_pos"]
             self.dataset["dof_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_vel"]
             self.dataset["key_body_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["key_body_pos"]
-            self.dataset["DiscrimObs"][ds_strt_ind:ds_strt_ind + state_len] = state["DiscrimObs"]
             self.dataset["HumanoidObservations"][ds_strt_ind:ds_strt_ind + state_len] = state["HumanoidObservations"]
             self.dataset["Actions"][ds_strt_ind:ds_strt_ind + state_len] = state["Actions"]
             self.dataset["Reset"][ds_strt_ind:ds_strt_ind + state_len] = state["Reset"]
@@ -342,7 +348,7 @@ class IQL_Calm:
 
         self.target_critic = self.fabric.setup(target_critic)
 
-        discriminator: MultiHeadedMLP = instantiate(
+        discriminator: JointDiscMLP = instantiate(
             self.config.discriminator,
             num_in=self.discriminator_obs_size_per_step
                    * self.all_config.env.config.discriminator_obs_historical_steps,
@@ -372,9 +378,9 @@ class IQL_Calm:
             encoder, encoder_optimizer
         )
 
-        #state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_3/last.ckpt", map_location=self.device)
-        #self.actor.load_state_dict(state_dict["actor"])
-        #self.save(name="last_a.ckpt")
+        state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_0/last.ckpt", map_location=self.device)
+        self.actor.load_state_dict(state_dict["actor"])
+        self.save(name="last_a.ckpt")
 
     def fit(self):
 
@@ -390,29 +396,25 @@ class IQL_Calm:
             v_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             q_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             desciptor_r = torch.zeros(self.update_steps_per_stage * batch_count)
-            enc_r = torch.zeros(self.update_steps_per_stage * batch_count)
-            total_r = torch.zeros(self.update_steps_per_stage * batch_count)
             for i in range(self.update_steps_per_stage):
                 for batch_id in range(batch_count):
 
                     self.dataset_roll()
 
                     batch = {
-                        "latents": self.dataset["latents"][0:self.config.batch_size],
+                        "latents": self.dataset["latents"][0:self.config.batch_size].detach(),
                         "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
                         "HumanoidObservations": self.dataset["HumanoidObservations"][0:self.config.batch_size],
                         "Actions": self.dataset["Actions"][0:self.config.batch_size],
                         "Reset": self.dataset["Reset"][0:self.config.batch_size],
                     }
 
-                    desc_r = self.calculate_discriminator_reward(batch["DiscrimObs"]).squeeze()#torch.ones(self.config.batch_size, device=self.device)
-                    mi_r = self.calc_mi_reward(batch["DiscrimObs"], batch["latents"])
+                    desc_r = self.calculate_discriminator_reward({"obs":batch["DiscrimObs"],
+                                                                  "latents":batch["latents"]}).squeeze()
 
-                    reward = desc_r.detach() + mi_r.detach() + 1
+                    reward = desc_r.detach()
 
                     desciptor_r[batch_id * self.update_steps_per_stage + i] = desc_r.mean().detach()
-                    enc_r[batch_id * self.update_steps_per_stage + i] = mi_r.mean().detach()
-                    total_r[batch_id * self.update_steps_per_stage + i] = reward.mean().detach()
 
                     """
                     VF Loss
@@ -463,18 +465,15 @@ class IQL_Calm:
 
             self.log_dict.update({
                 "reward/desc":desciptor_r.mean(),
-                "reward/end": enc_r.mean(),
-                "reward/total": total_r.mean()
             })
             self.log_dict.update({"ac/v_loss": v_loss_tensor.mean()})
             self.log_dict.update({"ac/q_loss": q_loss_tensor.mean()})
 
             a_loss_tensor_adw_exp = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_adw_neglog = torch.zeros(self.update_steps_per_stage * batch_count)
-            a_loss_tensor_adw_b_c = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_adw = torch.zeros(self.update_steps_per_stage * batch_count)
-            a_loss_tensor_div = torch.zeros(self.update_steps_per_stage * batch_count)
-            a_loss_tensor_total = torch.zeros(self.update_steps_per_stage * batch_count)
+            enc_loss_log = torch.zeros(self.update_steps_per_stage * batch_count)
+            disc_loss_log = torch.zeros(self.update_steps_per_stage * batch_count)
 
             print(f'Actor Step')
             for i in range(self.update_steps_per_stage):
@@ -490,7 +489,8 @@ class IQL_Calm:
 
                     self.actor.training = True
                     actor_out = self.actor.training_forward(
-                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"],
+                        {"obs": batch["HumanoidObservations"],
+                         "actions": batch["Actions"],
                          "latents": batch["latents"]})
 
                     self.target_critic.eval()
@@ -506,33 +506,35 @@ class IQL_Calm:
 
                     actor_adw_loss = (exp_adv * actor_out["neglogp"]).mean()
 
+                    enc_loss = self.enc_reg_loss(self.config.batch_size)
+
+                    disc_loss = self.conditional_disc_loss({"obs":batch["DiscrimObs"],"latents":batch["latents"].detach()})
+
+                    loss = actor_adw_loss + enc_loss + disc_loss
+
+                    self.actor_optimizer.zero_grad()
+                    self.encoder_optimizer.zero_grad()
+                    self.discriminator_optimizer.zero_grad()
+                    self.fabric.backward(loss.mean(), retain_graph=True)
+                    self.actor_optimizer.step()
+                    self.encoder_optimizer.step()
+                    self.discriminator_optimizer.step()
+
                     a_loss_tensor_adw_exp[batch_id * self.update_steps_per_stage + i] = exp_adv.mean().detach()
                     a_loss_tensor_adw_neglog[batch_id * self.update_steps_per_stage + i] = actor_out[
                         "neglogp"].mean().detach()
-                    a_loss_tensor_adw_b_c[batch_id * self.update_steps_per_stage + i] = actor_adw_loss.detach()
-
-                    # actor_adw_loss = torch.clamp(actor_adw_loss,max=100)
-
-                    actor_div_loss, div_loss_log = self.calculate_extra_actor_loss(
-                        {"obs": batch["HumanoidObservations"], "latents": batch["latents"], "actions": batch["Actions"]})
-
-                    actor_loss = actor_adw_loss + actor_div_loss
-
                     a_loss_tensor_adw[batch_id * self.update_steps_per_stage + i] = actor_adw_loss.mean().detach()
-                    a_loss_tensor_div[batch_id * self.update_steps_per_stage + i] = actor_div_loss.mean().detach()
-                    a_loss_tensor_total[batch_id * self.update_steps_per_stage + i] = actor_loss.mean().detach()
+                    enc_loss_log[batch_id * self.update_steps_per_stage + i] = enc_loss.mean().detach()
+                    disc_loss_log[batch_id * self.update_steps_per_stage + i] = disc_loss.mean().detach()
 
-                    self.actor_optimizer.zero_grad()
-                    self.fabric.backward(actor_loss.mean())
-                    self.actor_optimizer.step()
 
             self.log_dict.update({"actor_loss/adw_exp": a_loss_tensor_adw_exp.mean()})
             self.log_dict.update({"actor_loss/neg_log": a_loss_tensor_adw_neglog.mean()})
-            self.log_dict.update({"actor_loss/adw_before_clip": a_loss_tensor_adw_b_c.mean()})
-            self.log_dict.update({"actor_loss/adw_after_clip": a_loss_tensor_adw.mean()})
-            self.log_dict.update({"actor_loss/div": a_loss_tensor_div.mean()})
-            self.log_dict.update({"actor_loss/total": a_loss_tensor_total.mean()})
+            self.log_dict.update({"actor_loss/loss_adw": a_loss_tensor_adw.mean()})
+            self.log_dict.update({"actor_loss/enc_loss": enc_loss_log.mean()})
+            self.log_dict.update({"actor_loss/disc_loss": disc_loss_log.mean()})
 
+            '''
             for i in range(self.update_steps_per_stage):
                 for batch_id in range(batch_count):
 
@@ -596,22 +598,151 @@ class IQL_Calm:
 
                     self.discriminator_optimizer.zero_grad()
                     self.fabric.backward(disc_loss)
-                    self.discriminator_optimizer.step()
+                    self.discriminator_optimizer.step()'''
 
             self.fabric.log_dict(self.log_dict, self.current_epoch)
 
             if self.current_epoch % 10 == 0:
                 self.save()
 
+    # todo: make faster
     def sample_latents(self, n):
+        enc_in = self.sample_enc_demo_obs(n)
+
+        latents = self.encoder({"obs": enc_in})
+
+        return latents
+
+    def sample_enc_demo_obs(self, n):
         motion_ids = np.random.choice(np.array(list(self.demo_data.keys())), n)
-
+        result = []
         for m_id in motion_ids:
-            len = self.demo_data[m_id]["root_pos"].shape[0]
-            pass
+            len = self.demo_data[m_id]["DiscrimObs"].shape[0]
+            truncated_len = len - self.config.num_obs_enc_steps
 
-        return None
+            assert truncated_len >= 0
 
+            start = random.randint(0, truncated_len)
+
+            enc_in = self.demo_data[m_id]["DiscrimObs"][start: start + self.config.num_obs_enc_steps].flatten()
+            result.append(enc_in)
+
+        return torch.stack(result)
+
+    def sample_enc_demo_obs_pair(self, n):
+        motion_ids = np.random.choice(np.array(list(self.demo_data.keys())), n)
+        result1 = []
+        result2 = []
+        for m_id in motion_ids:
+            len = self.demo_data[m_id]["DiscrimObs"].shape[0]
+            truncated_len = len - self.config.num_obs_enc_steps
+
+            assert truncated_len >= 0
+
+            start1 = random.randint(0, truncated_len)
+            start2 = random.randint(start1, min(start1 + self.config.num_obs_enc_steps // 2, truncated_len))
+
+            enc_in1 = self.demo_data[m_id]["DiscrimObs"][start1: start1 + self.config.num_obs_enc_steps].flatten()
+            enc_in2 = self.demo_data[m_id]["DiscrimObs"][start2: start2 + self.config.num_obs_enc_steps].flatten()
+
+            result1.append(enc_in1)
+            result2.append(enc_in2)
+
+        return torch.stack(result1), torch.stack(result2)
+
+    def calculate_discriminator_reward(self, input_dict):
+        """
+        input dict = {
+            "obs":
+            "latents"
+        }
+        """
+
+        with torch.no_grad():
+            disc_logits = self.discriminator(input_dict)
+            prob = 1 / (1 + torch.exp(-disc_logits))
+            disc_r = -torch.log(torch.maximum(1 - prob, torch.tensor(0.0001, device=self.device)))
+            disc_r *= self.config.discriminator_reward_w
+
+        return disc_r
+
+    def enc_reg_loss(self, b_size):
+        enc_amp_obs_demo = self.sample_enc_demo_obs(b_size)
+
+        amp_obs_encoding = self.encoder({"obs": enc_amp_obs_demo})
+
+        # Loss for uniform distribution over the sphere
+        def uniform_loss(x, t=2):
+            return torch.pdist(x, p=2).pow(2).mul(-t).exp().mean().log()
+        uniform_l = uniform_loss(amp_obs_encoding)
+
+        similar_enc_amp_obs_demo0, similar_enc_amp_obs_demo1 = self.sample_enc_demo_obs_pair(b_size)
+
+        similar_amp_obs_encoding0 = self.encoder({"obs": similar_enc_amp_obs_demo0})
+        similar_amp_obs_encoding1 = self.encoder({"obs": similar_enc_amp_obs_demo1})
+
+        # Loss for alignment - overlapping motions should have 'close' embeddings
+        def align_loss(x, y, alpha=2):
+            return torch.linalg.norm(x - y, ord=2, dim=1).pow(alpha).mean()
+        align_l = align_loss(similar_amp_obs_encoding0, similar_amp_obs_encoding1)
+
+        loss = align_l + 0.5 * uniform_l
+
+        return loss
+
+    def conditional_disc_loss(self, input_dict):
+        """
+        input dict = {
+            "obs":
+            "latents"
+        }
+        """
+
+        batch_size = input_dict["obs"].shape[0]
+
+        disc_agent_logit = self.discriminator(input_dict)
+
+        demo_enc_obs = self.sample_enc_demo_obs(batch_size)
+        reshaped_obs = demo_enc_obs.view(batch_size, self.config.num_obs_enc_steps, self.discriminator_obs_size_per_step)
+        random_indices = torch.randint(0, self.config.num_obs_enc_steps, (batch_size,))
+        demo_disc_obs = reshaped_obs[torch.arange(batch_size), random_indices]
+
+        demo_disc_obs.requires_grad = True
+
+        with torch.no_grad():
+            demo_enc = self.encoder({"obs": demo_enc_obs})
+        demo_enc.requires_grad = True
+
+        demo_dict =  self.discriminator({"obs":demo_disc_obs,"latents":demo_enc}, return_norm_obs=True)
+        disc_demo_logit = demo_dict["outs"]
+        demo_norm_obs = demo_dict["norm_obs"]
+
+        # prediction loss
+        disc_loss_agent = self.disc_loss_neg(disc_agent_logit)
+        disc_loss_demo = self.disc_loss_pos(disc_demo_logit)
+        disc_loss = 0.5 * (disc_loss_agent + disc_loss_demo)
+
+        # logit reg
+        logit_weights = self.discriminator.logit_weights()
+        disc_logit_loss = sum([p.pow(2).sum() for p in logit_weights])
+        disc_loss += self.config.discriminator_logit_weight_decay * disc_logit_loss
+
+        # grad penalty
+        disc_demo_grad = torch.autograd.grad(disc_demo_logit, (demo_norm_obs, demo_enc),
+                                             grad_outputs=torch.ones_like(disc_demo_logit),
+                                             create_graph=True, retain_graph=True, only_inputs=True)
+        disc_demo_grad = disc_demo_grad[0]
+        disc_demo_grad = torch.sum(torch.square(disc_demo_grad), dim=-1)
+        disc_grad_penalty = torch.mean(disc_demo_grad)
+        disc_loss += self.config.discriminator_grad_penalty * disc_grad_penalty
+
+        # weight decay
+        if self.config.discriminator_weight_decay != 0:
+            all_weight_params = self.discriminator.all_discriminator_weights()
+            total: Tensor = sum([p.pow(2).sum() for p in all_weight_params])
+            disc_loss += total * self.config.discriminator_weight_decay
+
+        return disc_loss
 
     def setup_character_props(self):
         self.dof_body_ids = self.all_config.robot.dfs_dof_body_ids
