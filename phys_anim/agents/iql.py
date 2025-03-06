@@ -243,7 +243,7 @@ class IQL:
         pass
 
     def fill_dataset(self):
-        subset_ind = random.randint(0, len(self.demo_subsets)-1)
+        subset_ind = random.randint(0, len(self.demo_subsets) - 1)
         motion_ids = list(self.demo_subsets[subset_ind].keys())
         ds_strt_ind = 0
         while len(motion_ids) > 0:
@@ -259,11 +259,12 @@ class IQL:
             self.demo_dataset["dof_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_vel"]
             self.demo_dataset["key_body_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["key_body_pos"]
             self.demo_dataset["DiscrimObs"][ds_strt_ind:ds_strt_ind + state_len] = state["DiscrimObs"]
-            self.demo_dataset["HumanoidObservations"][ds_strt_ind:ds_strt_ind + state_len] = state["HumanoidObservations"]
+            self.demo_dataset["HumanoidObservations"][ds_strt_ind:ds_strt_ind + state_len] = state[
+                "HumanoidObservations"]
             self.demo_dataset["Actions"][ds_strt_ind:ds_strt_ind + state_len] = state["Actions"]
             ds_strt_ind += state_len
 
-        subset_ind = random.randint(0, len(self.data_subsets)-1)
+        subset_ind = random.randint(0, len(self.data_subsets) - 1)
         motion_ids = list(self.data_subsets[subset_ind].keys())
         ds_strt_ind = 0
         while len(motion_ids) > 0:
@@ -289,24 +290,28 @@ class IQL:
         self.demo_dataset["root_pos"] = torch.roll(self.demo_dataset["root_pos"], shifts=-self.config.batch_size)
         self.demo_dataset["root_rot"] = torch.roll(self.demo_dataset["root_rot"], shifts=-self.config.batch_size)
         self.demo_dataset["root_vel"] = torch.roll(self.demo_dataset["root_vel"], shifts=-self.config.batch_size)
-        self.demo_dataset["root_ang_vel"] = torch.roll(self.demo_dataset["root_ang_vel"], shifts=-self.config.batch_size)
+        self.demo_dataset["root_ang_vel"] = torch.roll(self.demo_dataset["root_ang_vel"],
+                                                       shifts=-self.config.batch_size)
         self.demo_dataset["dof_pos"] = torch.roll(self.demo_dataset["dof_pos"], shifts=-self.config.batch_size)
         self.demo_dataset["dof_vel"] = torch.roll(self.demo_dataset["dof_vel"], shifts=-self.config.batch_size)
-        self.demo_dataset["key_body_pos"] = torch.roll(self.demo_dataset["key_body_pos"], shifts=-self.config.batch_size)
+        self.demo_dataset["key_body_pos"] = torch.roll(self.demo_dataset["key_body_pos"],
+                                                       shifts=-self.config.batch_size)
         self.demo_dataset["DiscrimObs"] = torch.roll(self.demo_dataset["DiscrimObs"], shifts=-self.config.batch_size)
-        self.demo_dataset["HumanoidObservations"] = torch.roll(self.demo_dataset["HumanoidObservations"], shifts=-self.config.batch_size)
+        self.demo_dataset["HumanoidObservations"] = torch.roll(self.demo_dataset["HumanoidObservations"],
+                                                               shifts=-self.config.batch_size)
         self.demo_dataset["Actions"] = torch.roll(self.demo_dataset["Actions"], shifts=-self.config.batch_size)
 
         self.dataset["latents"] = torch.roll(self.dataset["latents"], shifts=-self.config.batch_size)
         self.dataset["root_pos"] = torch.roll(self.dataset["root_pos"], shifts=-self.config.batch_size)
         self.dataset["root_rot"] = torch.roll(self.dataset["root_rot"], shifts=-self.config.batch_size)
         self.dataset["root_vel"] = torch.roll(self.dataset["root_vel"], shifts=-self.config.batch_size)
-        self.dataset["root_ang_vel"] = torch.roll(self.dataset["root_ang_vel"],shifts=-self.config.batch_size)
+        self.dataset["root_ang_vel"] = torch.roll(self.dataset["root_ang_vel"], shifts=-self.config.batch_size)
         self.dataset["dof_pos"] = torch.roll(self.dataset["dof_pos"], shifts=-self.config.batch_size)
         self.dataset["dof_vel"] = torch.roll(self.dataset["dof_vel"], shifts=-self.config.batch_size)
-        self.dataset["key_body_pos"] = torch.roll(self.dataset["key_body_pos"],shifts=-self.config.batch_size)
+        self.dataset["key_body_pos"] = torch.roll(self.dataset["key_body_pos"], shifts=-self.config.batch_size)
         self.dataset["DiscrimObs"] = torch.roll(self.dataset["DiscrimObs"], shifts=-self.config.batch_size)
-        self.dataset["HumanoidObservations"] = torch.roll(self.dataset["HumanoidObservations"],shifts=-self.config.batch_size)
+        self.dataset["HumanoidObservations"] = torch.roll(self.dataset["HumanoidObservations"],
+                                                          shifts=-self.config.batch_size)
         self.dataset["Actions"] = torch.roll(self.dataset["Actions"], shifts=-self.config.batch_size)
         self.dataset["Reset"] = torch.roll(self.dataset["Reset"], shifts=-self.config.batch_size)
 
@@ -364,7 +369,7 @@ class IQL:
             discriminator, discriminator_optimizer
         )
 
-        #state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_3/last.ckpt", map_location=self.device)
+        #state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_5/last.ckpt", map_location=self.device)
         #self.actor.load_state_dict(state_dict["actor"])
         #self.save(name="last_a.ckpt")
 
@@ -397,7 +402,8 @@ class IQL:
                         "Reset": self.dataset["Reset"][0:self.config.batch_size],
                     }
 
-                    desc_r = self.calculate_discriminator_reward(batch["DiscrimObs"]).squeeze()#torch.ones(self.config.batch_size, device=self.device)
+                    desc_r = self.calculate_discriminator_reward(
+                        batch["DiscrimObs"]).squeeze()  # torch.ones(self.config.batch_size, device=self.device)
                     mi_r = self.calc_mi_reward(batch["DiscrimObs"], batch["latents"])
 
                     reward = desc_r.detach() + mi_r.detach() + 1
@@ -429,7 +435,8 @@ class IQL:
                     next_obs = torch.roll(batch["HumanoidObservations"], shifts=-1, dims=0)
                     next_latents = torch.roll(batch["latents"], shifts=-1, dims=0)
 
-                    q_target = reward + (1. - batch["Reset"]) * self.discount * self.critic_s({"obs": next_obs, "latents": next_latents}).detach()
+                    q_target = reward + (1. - batch["Reset"]) * self.discount * self.critic_s(
+                        {"obs": next_obs, "latents": next_latents}).detach()
                     q_target = q_target.detach()
                     q_pred = self.critic_sa({"obs": batch["HumanoidObservations"], "actions": batch["Actions"],
                                              "latents": batch["latents"]})
@@ -454,7 +461,7 @@ class IQL:
                         param_target.data = (1 - self.alpha) * param_target.data + self.alpha * param_cur.data
 
             self.log_dict.update({
-                "reward/desc":desciptor_r.mean(),
+                "reward/desc": desciptor_r.mean(),
                 "reward/end": enc_r.mean(),
                 "reward/total": total_r.mean()
             })
@@ -506,7 +513,8 @@ class IQL:
                     # actor_adw_loss = torch.clamp(actor_adw_loss,max=100)
 
                     actor_div_loss, div_loss_log = self.calculate_extra_actor_loss(
-                        {"obs": batch["HumanoidObservations"], "latents": batch["latents"], "actions": batch["Actions"]})
+                        {"obs": batch["HumanoidObservations"], "latents": batch["latents"],
+                         "actions": batch["Actions"]})
 
                     actor_loss = actor_adw_loss + actor_div_loss
 
@@ -527,12 +535,11 @@ class IQL:
 
             for i in range(self.update_steps_per_stage):
                 for batch_id in range(batch_count):
-
                     self.dataset_roll()
 
                     batch = {
                         "latents": self.dataset["latents"][0:self.config.batch_size],
-                        "root_pos" : self.dataset["root_pos"][0:self.config.batch_size],
+                        "root_pos": self.dataset["root_pos"][0:self.config.batch_size],
                         "root_rot": self.dataset["root_rot"][0:self.config.batch_size],
                         "root_vel": self.dataset["root_vel"][0:self.config.batch_size],
                         "root_ang_vel": self.dataset["root_ang_vel"][0:self.config.batch_size],
@@ -583,7 +590,8 @@ class IQL:
                     )
 
                     disc_loss, disc_log_dict = self.encoder_step(
-                        {"AgentDiscObs": agent_disc_obs, "DemoDiscObs": demo_batch["DiscrimObs"], "latents": batch["latents"]})
+                        {"AgentDiscObs": agent_disc_obs, "DemoDiscObs": demo_batch["DiscrimObs"],
+                         "latents": batch["latents"]})
                     self.log_dict.update(disc_log_dict)
 
                     self.discriminator_optimizer.zero_grad()
@@ -600,6 +608,18 @@ class IQL:
             [n, sum(self.config.infomax_parameters.latent_dim)], device=self.device
         )
 
+        cur_ind = 0
+        while cur_ind < latents.shape[0]:
+            len = random.randint(1, 150)
+            end = np.clip(cur_ind + len, 0, latents.shape[0])
+            gaussian_sample = torch.normal(latents[:, cur_ind: end])
+            projected_gaussian_sample = torch.nn.functional.normalize(
+                gaussian_sample, dim=-1
+            )
+            latents[:, cur_ind: end] = projected_gaussian_sample
+            cur_ind += len
+
+        '''
         start = 0
         for idx, dim in enumerate(self.config.infomax_parameters.latent_dim):
             if self.config.infomax_parameters.latent_types[idx] == "gaussian":
@@ -628,7 +648,7 @@ class IQL:
             else:
                 raise NotImplementedError
 
-            start += dim
+            start += dim'''
 
         return latents
 
