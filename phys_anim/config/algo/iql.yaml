@@ -187,7 +187,7 @@ env:
       local_root_obs: True
       root_height_obs: True
 
-    discriminator_obs_historical_steps: 1
+    discriminator_obs_historical_steps: 10
     disable_discriminator: False
     discriminator_obs_size_per_step: ${eval:13+2*${robot.dof_obs_size}+${robot.number_of_actions}+3*${robot.num_key_bodies}}
 

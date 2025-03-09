@@ -41,6 +41,8 @@ class IQL:
         self.discriminator_obs_size_per_step = (
             self.all_config.env.config.discriminator_obs_size_per_step
         )
+        self.disc_obs_size = (self.discriminator_obs_size_per_step
+                               * self.all_config.env.config.discriminator_obs_historical_steps)
 
         self.current_epoch = 0
 
@@ -138,7 +140,7 @@ class IQL:
             "dof_vel": torch.zeros(motion_libs[0].actions.shape[0], state.dof_vel.shape[1], device=self.device),
             "key_body_pos": torch.zeros(motion_libs[0].actions.shape[0], state.key_body_pos.shape[1],
                                         state.key_body_pos.shape[2], device=self.device),
-            "DiscrimObs": torch.zeros(motion_libs[0].actions.shape[0], self.discriminator_obs_size_per_step,
+            "DiscrimObs": torch.zeros(motion_libs[0].actions.shape[0], self.disc_obs_size,
                                       device=self.device),
             "Actions": torch.zeros(motion_libs[0].actions.shape[0], self.num_act, device=self.device),
             "HumanoidObservations": torch.zeros(motion_libs[0].actions.shape[0], self.num_obs, device=self.device)
@@ -229,7 +231,7 @@ class IQL:
             "dof_vel": torch.zeros(motion_libs[0].actions.shape[0], state.dof_vel.shape[1], device=self.device),
             "key_body_pos": torch.zeros(motion_libs[0].actions.shape[0], state.key_body_pos.shape[1],
                                         state.key_body_pos.shape[2], device=self.device),
-            "DiscrimObs": torch.zeros(motion_libs[0].actions.shape[0], self.discriminator_obs_size_per_step,
+            "DiscrimObs": torch.zeros(motion_libs[0].actions.shape[0], self.disc_obs_size,
                                       device=self.device),
             "Actions": torch.zeros(motion_libs[0].actions.shape[0], self.num_act, device=self.device),
             "HumanoidObservations": torch.zeros(motion_libs[0].actions.shape[0], self.num_obs, device=self.device),
@@ -258,7 +260,7 @@ class IQL:
             self.demo_dataset["dof_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_pos"]
             self.demo_dataset["dof_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_vel"]
             self.demo_dataset["key_body_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["key_body_pos"]
-            self.demo_dataset["DiscrimObs"][ds_strt_ind:ds_strt_ind + state_len] = state["DiscrimObs"]
+            self.demo_dataset["DiscrimObs"][ds_strt_ind:ds_strt_ind + state_len] = self.make_disc_with_hist_obs(state["DiscrimObs"], torch.zeros(state["DiscrimObs"].shape[0]))
             self.demo_dataset["HumanoidObservations"][ds_strt_ind:ds_strt_ind + state_len] = state[
                 "HumanoidObservations"]
             self.demo_dataset["Actions"][ds_strt_ind:ds_strt_ind + state_len] = state["Actions"]
@@ -279,7 +281,7 @@ class IQL:
             self.dataset["dof_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_pos"]
             self.dataset["dof_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_vel"]
             self.dataset["key_body_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["key_body_pos"]
-            self.dataset["DiscrimObs"][ds_strt_ind:ds_strt_ind + state_len] = state["DiscrimObs"]
+            self.dataset["DiscrimObs"][ds_strt_ind:ds_strt_ind + state_len] = self.make_disc_with_hist_obs(state["DiscrimObs"], state["Reset"])
             self.dataset["HumanoidObservations"][ds_strt_ind:ds_strt_ind + state_len] = state["HumanoidObservations"]
             self.dataset["Actions"][ds_strt_ind:ds_strt_ind + state_len] = state["Actions"]
             self.dataset["Reset"][ds_strt_ind:ds_strt_ind + state_len] = state["Reset"]
@@ -369,9 +371,9 @@ class IQL:
             discriminator, discriminator_optimizer
         )
 
-        #state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_5/last.ckpt", map_location=self.device)
-        #self.actor.load_state_dict(state_dict["actor"])
-        #self.save(name="last_a.ckpt")
+        state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_6/last.ckpt", map_location=self.device)
+        self.actor.load_state_dict(state_dict["actor"])
+        self.save(name="last_a.ckpt")
 
     def fit(self):
 
@@ -588,6 +590,8 @@ class IQL:
                         False,
                         self.w_last,
                     )
+
+                    agent_disc_obs = self.make_disc_with_hist_obs(agent_disc_obs,torch.zeros(agent_disc_obs.shape[0], device=self.device))
 
                     disc_loss, disc_log_dict = self.encoder_step(
                         {"AgentDiscObs": agent_disc_obs, "DemoDiscObs": demo_batch["DiscrimObs"],
@@ -964,6 +968,29 @@ class IQL:
             total_error.append(err)
 
         return torch.cat(total_error, dim=-1)
+
+    def make_disc_with_hist_obs(self, dics_obs:torch.Tensor, reset:torch.Tensor):
+        disc_steps_len = dics_obs.shape[0]
+        hist_steps = self.all_config.env.config.discriminator_obs_historical_steps
+        obs_size = self.discriminator_obs_size_per_step
+
+        padding = torch.zeros((hist_steps - 1, obs_size), device=self.device)
+        padded_obs = torch.cat([padding, dics_obs], dim=0)
+
+        temp = torch.zeros((dics_obs.shape[0],
+                            self.all_config.env.config.discriminator_obs_historical_steps,
+                            self.discriminator_obs_size_per_step),
+                           device = self.device)
+
+        #for i in range(0, disc_steps_len):
+        #    for j in range(self.all_config.env.config.discriminator_obs_historical_steps):
+        #            temp[i, j] = padded_obs[i - j + hist_steps - 1]
+
+        indices = (torch.arange(disc_steps_len, device=self.device).unsqueeze(1) +
+                   torch.arange(hist_steps, device=self.device).flip(0))
+        temp = padded_obs[indices]
+
+        return temp.reshape(disc_steps_len,-1)
 
     def get_state_dict(self, state_dict):
         extra_state_dict = {
