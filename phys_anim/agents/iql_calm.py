@@ -18,7 +18,8 @@ from phys_anim.envs.env_utils.general import StepTracker
 from phys_anim.agents.models.infomax import JointDiscWithMutualInformationEncMLP
 from phys_anim.agents.models.mlp import MultiHeadedMLP, MLP_WithNorm
 from phys_anim.agents.models.discriminator import JointDiscMLP
-from phys_anim.envs.humanoid.humanoid_utils import build_disc_observations,build_disc_action_observations, compute_humanoid_observations_max
+from phys_anim.envs.humanoid.humanoid_utils import build_disc_observations, build_disc_action_observations, \
+    compute_humanoid_observations_max
 import math
 import numpy as np
 
@@ -128,23 +129,6 @@ class IQL_Calm:
                 )
             }
 
-        #print("Demo Dataset Creating")
-        #self.demo_dataset = {
-        #    "root_pos": torch.zeros(motion_libs[0].actions.shape[0], state.root_pos.shape[1], device=self.device),
-        #    "root_rot": torch.zeros(motion_libs[0].actions.shape[0], state.root_rot.shape[1], device=self.device),
-        #    "root_vel": torch.zeros(motion_libs[0].actions.shape[0], state.root_vel.shape[1], device=self.device),
-        #    "root_ang_vel": torch.zeros(motion_libs[0].actions.shape[0], state.root_ang_vel.shape[1],
-        #                                device=self.device),
-        #    "dof_pos": torch.zeros(motion_libs[0].actions.shape[0], state.dof_pos.shape[1], device=self.device),
-        #    "dof_vel": torch.zeros(motion_libs[0].actions.shape[0], state.dof_vel.shape[1], device=self.device),
-        #    "key_body_pos": torch.zeros(motion_libs[0].actions.shape[0], state.key_body_pos.shape[1],
-        #                                state.key_body_pos.shape[2], device=self.device),
-        #    "DiscrimObs": torch.zeros(motion_libs[0].actions.shape[0], self.discriminator_obs_size_per_step,
-        #                              device=self.device),
-        #    "Actions": torch.zeros(motion_libs[0].actions.shape[0], self.num_act, device=self.device),
-        #    "HumanoidObservations": torch.zeros(motion_libs[0].actions.shape[0], self.num_obs, device=self.device)
-        #}
-
         print("Dataset Processing START")
         motion_libs = []
         resets = []
@@ -186,7 +170,7 @@ class IQL_Calm:
                     "dof_vel": state.dof_vel,
                     "key_body_pos": state.key_body_pos,
                     "Actions": state.action,
-                    "DiscrimObs": build_disc_action_observations(
+                    "DiscrimObs": build_disc_observations(
                         state.root_pos,
                         state.root_rot,
                         state.root_vel,
@@ -195,7 +179,6 @@ class IQL_Calm:
                         state.dof_vel,
                         state.key_body_pos,
                         torch.zeros(1, device=self.device),
-                        state.action,
                         self.all_config.env.config.humanoid_obs.local_root_obs,
                         self.all_config.env.config.humanoid_obs.root_height_obs,
                         self.all_config.robot.dof_obs_size,
@@ -228,7 +211,8 @@ class IQL_Calm:
             "dof_vel": torch.zeros(motion_libs[0].actions.shape[0], state.dof_vel.shape[1], device=self.device),
             "key_body_pos": torch.zeros(motion_libs[0].actions.shape[0], state.key_body_pos.shape[1],
                                         state.key_body_pos.shape[2], device=self.device),
-            "DiscrimObs": torch.zeros(motion_libs[0].actions.shape[0], self.discriminator_obs_size_per_step,
+            "DiscrimObs": torch.zeros(motion_libs[0].actions.shape[0],
+                                      self.discriminator_obs_size_per_step * self.all_config.env.config.discriminator_obs_historical_steps,
                                       device=self.device),
             "Actions": torch.zeros(motion_libs[0].actions.shape[0], self.num_act, device=self.device),
             "HumanoidObservations": torch.zeros(motion_libs[0].actions.shape[0], self.num_obs, device=self.device),
@@ -242,27 +226,7 @@ class IQL_Calm:
         pass
 
     def fill_dataset(self):
-        #subset_ind = random.randint(0, len(self.demo_subsets)-1)
-        #motion_ids = list(self.demo_subsets[subset_ind].keys())
-        #ds_strt_ind = 0
-        #while len(motion_ids) > 0:
-        #    motion_id = random.choice(motion_ids)
-        #    motion_ids.remove(motion_id)
-        #    state = self.demo_subsets[subset_ind][motion_id]
-        #    state_len = state["root_pos"].shape[0]
-        #    self.demo_dataset["root_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["root_pos"]
-        #    self.demo_dataset["root_rot"][ds_strt_ind:ds_strt_ind + state_len] = state["root_rot"]
-        #    self.demo_dataset["root_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["root_vel"]
-        #    self.demo_dataset["root_ang_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["root_ang_vel"]
-        #    self.demo_dataset["dof_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_pos"]
-        #    self.demo_dataset["dof_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_vel"]
-        #    self.demo_dataset["key_body_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["key_body_pos"]
-        #    self.demo_dataset["DiscrimObs"][ds_strt_ind:ds_strt_ind + state_len] = state["DiscrimObs"]
-        #    self.demo_dataset["HumanoidObservations"][ds_strt_ind:ds_strt_ind + state_len] = state["HumanoidObservations"]
-        #    self.demo_dataset["Actions"][ds_strt_ind:ds_strt_ind + state_len] = state["Actions"]
-        #    ds_strt_ind += state_len
-
-        subset_ind = random.randint(0, len(self.data_subsets)-1)
+        subset_ind = random.randint(0, len(self.data_subsets) - 1)
         motion_ids = list(self.data_subsets[subset_ind].keys())
         ds_strt_ind = 0
         while len(motion_ids) > 0:
@@ -277,6 +241,8 @@ class IQL_Calm:
             self.dataset["dof_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_pos"]
             self.dataset["dof_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_vel"]
             self.dataset["key_body_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["key_body_pos"]
+            self.dataset["DiscrimObs"][ds_strt_ind:ds_strt_ind + state_len] = self.make_disc_with_hist_obs(
+                state["DiscrimObs"], state["Reset"])
             self.dataset["HumanoidObservations"][ds_strt_ind:ds_strt_ind + state_len] = state["HumanoidObservations"]
             self.dataset["Actions"][ds_strt_ind:ds_strt_ind + state_len] = state["Actions"]
             self.dataset["Reset"][ds_strt_ind:ds_strt_ind + state_len] = state["Reset"]
@@ -284,27 +250,17 @@ class IQL_Calm:
 
     def dataset_roll(self):
 
-        #self.demo_dataset["root_pos"] = torch.roll(self.demo_dataset["root_pos"], shifts=-self.config.batch_size)
-        #self.demo_dataset["root_rot"] = torch.roll(self.demo_dataset["root_rot"], shifts=-self.config.batch_size)
-        #self.demo_dataset["root_vel"] = torch.roll(self.demo_dataset["root_vel"], shifts=-self.config.batch_size)
-        #self.demo_dataset["root_ang_vel"] = torch.roll(self.demo_dataset["root_ang_vel"], shifts=-self.config.batch_size)
-        #self.demo_dataset["dof_pos"] = torch.roll(self.demo_dataset["dof_pos"], shifts=-self.config.batch_size)
-        #self.demo_dataset["dof_vel"] = torch.roll(self.demo_dataset["dof_vel"], shifts=-self.config.batch_size)
-        #self.demo_dataset["key_body_pos"] = torch.roll(self.demo_dataset["key_body_pos"], shifts=-self.config.batch_size)
-        #self.demo_dataset["DiscrimObs"] = torch.roll(self.demo_dataset["DiscrimObs"], shifts=-self.config.batch_size)
-        #self.demo_dataset["HumanoidObservations"] = torch.roll(self.demo_dataset["HumanoidObservations"], shifts=-self.config.batch_size)
-        #self.demo_dataset["Actions"] = torch.roll(self.demo_dataset["Actions"], shifts=-self.config.batch_size)
-
         self.dataset["latents"] = torch.roll(self.dataset["latents"], shifts=-self.config.batch_size)
         self.dataset["root_pos"] = torch.roll(self.dataset["root_pos"], shifts=-self.config.batch_size)
         self.dataset["root_rot"] = torch.roll(self.dataset["root_rot"], shifts=-self.config.batch_size)
         self.dataset["root_vel"] = torch.roll(self.dataset["root_vel"], shifts=-self.config.batch_size)
-        self.dataset["root_ang_vel"] = torch.roll(self.dataset["root_ang_vel"],shifts=-self.config.batch_size)
+        self.dataset["root_ang_vel"] = torch.roll(self.dataset["root_ang_vel"], shifts=-self.config.batch_size)
         self.dataset["dof_pos"] = torch.roll(self.dataset["dof_pos"], shifts=-self.config.batch_size)
         self.dataset["dof_vel"] = torch.roll(self.dataset["dof_vel"], shifts=-self.config.batch_size)
-        self.dataset["key_body_pos"] = torch.roll(self.dataset["key_body_pos"],shifts=-self.config.batch_size)
+        self.dataset["key_body_pos"] = torch.roll(self.dataset["key_body_pos"], shifts=-self.config.batch_size)
         self.dataset["DiscrimObs"] = torch.roll(self.dataset["DiscrimObs"], shifts=-self.config.batch_size)
-        self.dataset["HumanoidObservations"] = torch.roll(self.dataset["HumanoidObservations"],shifts=-self.config.batch_size)
+        self.dataset["HumanoidObservations"] = torch.roll(self.dataset["HumanoidObservations"],
+                                                          shifts=-self.config.batch_size)
         self.dataset["Actions"] = torch.roll(self.dataset["Actions"], shifts=-self.config.batch_size)
         self.dataset["Reset"] = torch.roll(self.dataset["Reset"], shifts=-self.config.batch_size)
 
@@ -378,9 +334,9 @@ class IQL_Calm:
             encoder, encoder_optimizer
         )
 
-        state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_0/last.ckpt", map_location=self.device)
-        self.actor.load_state_dict(state_dict["actor"])
-        self.save(name="last_a.ckpt")
+        # state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_0/last.ckpt", map_location=self.device)
+        # self.actor.load_state_dict(state_dict["actor"])
+        # self.save(name="last_a.ckpt")
 
     def fit(self):
 
@@ -409,8 +365,8 @@ class IQL_Calm:
                         "Reset": self.dataset["Reset"][0:self.config.batch_size],
                     }
 
-                    desc_r = self.calculate_discriminator_reward({"obs":batch["DiscrimObs"],
-                                                                  "latents":batch["latents"]}).squeeze()
+                    desc_r = self.calculate_discriminator_reward({"obs": batch["DiscrimObs"],
+                                                                  "latents": batch["latents"]}).squeeze()
 
                     reward = desc_r.detach()
 
@@ -439,7 +395,8 @@ class IQL_Calm:
                     next_obs = torch.roll(batch["HumanoidObservations"], shifts=-1, dims=0)
                     next_latents = torch.roll(batch["latents"], shifts=-1, dims=0)
 
-                    q_target = reward + (1. - batch["Reset"]) * self.discount * self.critic_s({"obs": next_obs, "latents": next_latents}).detach()
+                    q_target = reward + (1. - batch["Reset"]) * self.discount * self.critic_s(
+                        {"obs": next_obs, "latents": next_latents}).detach()
                     q_target = q_target.detach()
                     q_pred = self.critic_sa({"obs": batch["HumanoidObservations"], "actions": batch["Actions"],
                                              "latents": batch["latents"]})
@@ -464,7 +421,7 @@ class IQL_Calm:
                         param_target.data = (1 - self.alpha) * param_target.data + self.alpha * param_cur.data
 
             self.log_dict.update({
-                "reward/desc":desciptor_r.mean(),
+                "reward/desc": desciptor_r.mean(),
             })
             self.log_dict.update({"ac/v_loss": v_loss_tensor.mean()})
             self.log_dict.update({"ac/q_loss": q_loss_tensor.mean()})
@@ -508,7 +465,8 @@ class IQL_Calm:
 
                     enc_loss = self.enc_reg_loss(self.config.batch_size)
 
-                    disc_loss = self.conditional_disc_loss({"obs":batch["DiscrimObs"],"latents":batch["latents"].detach()})
+                    disc_loss = self.conditional_disc_loss(
+                        {"obs": batch["DiscrimObs"], "latents": batch["latents"].detach()})
 
                     loss = actor_adw_loss + enc_loss + disc_loss
 
@@ -527,78 +485,11 @@ class IQL_Calm:
                     enc_loss_log[batch_id * self.update_steps_per_stage + i] = enc_loss.mean().detach()
                     disc_loss_log[batch_id * self.update_steps_per_stage + i] = disc_loss.mean().detach()
 
-
             self.log_dict.update({"actor_loss/adw_exp": a_loss_tensor_adw_exp.mean()})
             self.log_dict.update({"actor_loss/neg_log": a_loss_tensor_adw_neglog.mean()})
             self.log_dict.update({"actor_loss/loss_adw": a_loss_tensor_adw.mean()})
             self.log_dict.update({"actor_loss/enc_loss": enc_loss_log.mean()})
             self.log_dict.update({"actor_loss/disc_loss": disc_loss_log.mean()})
-
-            '''
-            for i in range(self.update_steps_per_stage):
-                for batch_id in range(batch_count):
-
-                    self.dataset_roll()
-
-                    batch = {
-                        "latents": self.dataset["latents"][0:self.config.batch_size],
-                        "root_pos" : self.dataset["root_pos"][0:self.config.batch_size],
-                        "root_rot": self.dataset["root_rot"][0:self.config.batch_size],
-                        "root_vel": self.dataset["root_vel"][0:self.config.batch_size],
-                        "root_ang_vel": self.dataset["root_ang_vel"][0:self.config.batch_size],
-                        "dof_pos": self.dataset["dof_pos"][0:self.config.batch_size],
-                        "dof_vel": self.dataset["dof_vel"][0:self.config.batch_size],
-                        "dof_vel": self.dataset["dof_vel"][0:self.config.batch_size],
-                        "key_body_pos": self.dataset["key_body_pos"][0:self.config.batch_size],
-                        "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
-                        "HumanoidObservations": self.dataset["HumanoidObservations"][0:self.config.batch_size],
-                        "Actions": self.dataset["Actions"][0:self.config.batch_size]
-                    }
-
-                    demo_batch = {
-                        "root_pos": self.demo_dataset["root_pos"][0:self.config.batch_size],
-                        "root_rot": self.demo_dataset["root_rot"][0:self.config.batch_size],
-                        "root_vel": self.demo_dataset["root_vel"][0:self.config.batch_size],
-                        "root_ang_vel": self.demo_dataset["root_ang_vel"][0:self.config.batch_size],
-                        "dof_pos": self.demo_dataset["dof_pos"][0:self.config.batch_size],
-                        "dof_vel": self.demo_dataset["dof_vel"][0:self.config.batch_size],
-                        "dof_vel": self.demo_dataset["dof_vel"][0:self.config.batch_size],
-                        "key_body_pos": self.demo_dataset["key_body_pos"][0:self.config.batch_size],
-                        "DiscrimObs": self.demo_dataset["DiscrimObs"][0:self.config.batch_size],
-                        "HumanoidObservations": self.demo_dataset["HumanoidObservations"][0:self.config.batch_size],
-                        "Actions": self.demo_dataset["Actions"][0:self.config.batch_size]
-                    }
-
-                    self.actor.training = False
-                    with torch.no_grad():
-                        actor_eval_out = self.actor.eval_forward(
-                            {"obs": batch["HumanoidObservations"], "latents": batch["latents"]})
-
-                    agent_disc_obs = build_disc_action_observations(
-                        batch["root_pos"],
-                        batch["root_rot"],
-                        batch["root_vel"],
-                        batch["root_ang_vel"],
-                        batch["dof_pos"],
-                        batch["dof_vel"],
-                        batch["key_body_pos"],
-                        torch.zeros(1, device=self.device),
-                        actor_eval_out["actions"],
-                        self.all_config.env.config.humanoid_obs.local_root_obs,
-                        self.all_config.env.config.humanoid_obs.root_height_obs,
-                        self.all_config.robot.dof_obs_size,
-                        self.dof_offsets,
-                        False,
-                        self.w_last,
-                    )
-
-                    disc_loss, disc_log_dict = self.encoder_step(
-                        {"AgentDiscObs": agent_disc_obs, "DemoDiscObs": demo_batch["DiscrimObs"], "latents": batch["latents"]})
-                    self.log_dict.update(disc_log_dict)
-
-                    self.discriminator_optimizer.zero_grad()
-                    self.fabric.backward(disc_loss)
-                    self.discriminator_optimizer.step()'''
 
             self.fabric.log_dict(self.log_dict, self.current_epoch)
 
@@ -607,11 +498,44 @@ class IQL_Calm:
 
     # todo: make faster
     def sample_latents(self, n):
-        enc_in = self.sample_enc_demo_obs(n)
 
-        latents = self.encoder({"obs": enc_in})
+        latents = torch.zeros(
+            [n, sum(self.config.infomax_parameters.latent_dim)], device=self.device
+        )
+
+        cur_ind = 0
+        while cur_ind < n:
+            len = random.randint(1, 150)
+            end = np.clip(cur_ind + len, 0, latents.shape[0])
+            enc_in = self.sample_enc_demo_obs(1)
+            latent = self.encoder({"obs": enc_in})
+            latents[cur_ind: end] = latent
+            cur_ind += len
 
         return latents
+
+    def make_disc_with_hist_obs(self, dics_obs: torch.Tensor, reset: torch.Tensor):
+        disc_steps_len = dics_obs.shape[0]
+        hist_steps = self.all_config.env.config.discriminator_obs_historical_steps
+        obs_size = self.discriminator_obs_size_per_step
+
+        padding = torch.zeros((hist_steps - 1, obs_size), device=self.device)
+        padded_obs = torch.cat([padding, dics_obs], dim=0)
+
+        temp = torch.zeros((dics_obs.shape[0],
+                            self.all_config.env.config.discriminator_obs_historical_steps,
+                            self.discriminator_obs_size_per_step),
+                           device=self.device)
+
+        # for i in range(0, disc_steps_len):
+        #    for j in range(self.all_config.env.config.discriminator_obs_historical_steps):
+        #            temp[i, j] = padded_obs[i - j + hist_steps - 1]
+
+        indices = (torch.arange(disc_steps_len, device=self.device).unsqueeze(1) +
+                   torch.arange(hist_steps, device=self.device).flip(0))
+        temp = padded_obs[indices]
+
+        return temp.reshape(disc_steps_len, -1)
 
     def sample_enc_demo_obs(self, n):
         motion_ids = np.random.choice(np.array(list(self.demo_data.keys())), n)
@@ -674,6 +598,7 @@ class IQL_Calm:
         # Loss for uniform distribution over the sphere
         def uniform_loss(x, t=2):
             return torch.pdist(x, p=2).pow(2).mul(-t).exp().mean().log()
+
         uniform_l = uniform_loss(amp_obs_encoding)
 
         similar_enc_amp_obs_demo0, similar_enc_amp_obs_demo1 = self.sample_enc_demo_obs_pair(b_size)
@@ -684,6 +609,7 @@ class IQL_Calm:
         # Loss for alignment - overlapping motions should have 'close' embeddings
         def align_loss(x, y, alpha=2):
             return torch.linalg.norm(x - y, ord=2, dim=1).pow(alpha).mean()
+
         align_l = align_loss(similar_amp_obs_encoding0, similar_amp_obs_encoding1)
 
         loss = align_l + 0.5 * uniform_l
@@ -703,9 +629,25 @@ class IQL_Calm:
         disc_agent_logit = self.discriminator(input_dict)
 
         demo_enc_obs = self.sample_enc_demo_obs(batch_size)
-        reshaped_obs = demo_enc_obs.view(batch_size, self.config.num_obs_enc_steps, self.discriminator_obs_size_per_step)
-        random_indices = torch.randint(0, self.config.num_obs_enc_steps, (batch_size,))
-        demo_disc_obs = reshaped_obs[torch.arange(batch_size), random_indices]
+        reshaped_obs = demo_enc_obs.view(batch_size, self.config.num_obs_enc_steps,
+                                         self.discriminator_obs_size_per_step)
+        random_start_ind = torch.randint(
+            0,
+            self.config.num_obs_enc_steps - self.all_config.env.config.discriminator_obs_historical_steps,
+            (batch_size,),
+            device=demo_enc_obs.device  # Ensure it's on the same device
+        )
+
+        # Construct index range for slicing
+        obs_historical_steps = self.all_config.env.config.discriminator_obs_historical_steps
+        index_range = torch.arange(obs_historical_steps, device=demo_enc_obs.device).unsqueeze(
+            0)  # (1, obs_historical_steps)
+        index_range = index_range + random_start_ind.unsqueeze(1)  # (batch_size, obs_historical_steps)
+
+        # Gather the selected observation sequences
+        demo_disc_obs = reshaped_obs[torch.arange(batch_size).unsqueeze(1), index_range]
+
+        demo_disc_obs = demo_disc_obs.reshape(batch_size,-1)
 
         demo_disc_obs.requires_grad = True
 
@@ -713,7 +655,7 @@ class IQL_Calm:
             demo_enc = self.encoder({"obs": demo_enc_obs})
         demo_enc.requires_grad = True
 
-        demo_dict =  self.discriminator({"obs":demo_disc_obs,"latents":demo_enc}, return_norm_obs=True)
+        demo_dict = self.discriminator({"obs": demo_disc_obs, "latents": demo_enc}, return_norm_obs=True)
         disc_demo_logit = demo_dict["outs"]
         demo_norm_obs = demo_dict["norm_obs"]
 
