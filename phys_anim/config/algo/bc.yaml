@@ -1,0 +1,77 @@
+# @package _global_
+
+algo:
+  config:
+
+    motion_files:
+      - output/recordings/IQL_firstdataset/RL_Avatar_Standoff_Circle_Motion.npy
+
+    models:
+      terrain_models:
+        mlp: null
+        transformer: null
+    # Setup discriminator structure
+    actor:
+      _target_: phys_anim.agents.models.actor.ActorFixedSigma
+      _recursive_: false
+      config:
+        initializer: default
+        mu_model:
+          _target_: phys_anim.agents.models.mlp.MultiHeadedMLP
+          _recursive_: false
+          config:
+            initializer: ${algo.config.actor.config.initializer}
+            units: [512, 512, 512, 512, 512, 512]
+            activation: ${algo.config.actor.config.activation}
+            normalize_obs: ${algo.config.normalize_obs}
+            obs_clamp_value: ${algo.config.obs_clamp_value}
+            use_layer_norm: ${algo.config.actor.config.use_layer_norm}
+            terrain_model: ${algo.config.models.terrain_models.mlp}
+            extra_inputs: null
+        init_logstd: -2.9
+        learnable_sigma: false
+        sigma_schedule: null
+        use_layer_norm: false
+        activation: relu
+
+    actor_optimizer:
+      _target_: torch.optim.Adam
+      lr: 2e-5
+      betas: [0.9, 0.999]
+
+    actor_lr_scheduler: null
+
+    #IQL parameters
+    expectile: 0.9
+    alpha: 0.5
+    batch_size: 1024
+    max_epochs: 28000
+    normalize_obs: True
+    obs_clamp_value: null
+    discriminator_reward_w: 2.0
+    discriminator_grad_penalty: 5
+    discriminator_weight_decay: 0.0001
+    discriminator_logit_weight_decay: 0.01
+    discount: 0.9
+    beta: 3 # aka temperatue
+
+    eval_callbacks: null
+
+    extra_inputs: null
+
+env:
+  config:
+    # Simulation params
+    ## Observations
+    humanoid_obs:
+      use_max_coords_obs: True
+      local_root_obs: True
+      root_height_obs: True
+
+    discriminator_obs_historical_steps: 10
+    disable_discriminator: False
+    discriminator_obs_size_per_step: ${eval:13+2*${robot.dof_obs_size}+${robot.number_of_actions}+3*${robot.num_key_bodies}}
+
+    ## Motion-related params
+    ### Respawn related params
+    state_init: Random
