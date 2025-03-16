@@ -2,7 +2,7 @@
 
 defaults:
   - /algo: mimic
-  - /env: mimic
+  - /env: mjc_mimic
   - /opt/disable_discriminator  # Default mimic experiments don't use the discriminator
   - /opt/mimic/mlp/target_pose_obs
   - /opt/mimic/global_tracking
@@ -12,4 +12,4 @@ defaults:
 #  config:
 #    action_as_dof: True
 
-experiment_name: full_body_tracker
+experiment_name: mjc_full_body_tracker

@@ -1033,7 +1033,7 @@ class Humanoid(BaseHumanoid, GymBaseInterface):  # type: ignore[misc]
         #pd_tar = pd_tar * mask
         #print(f"actions: {self.actions}")
         torch.set_printoptions(threshold=10000)
-        print(f"pd_tar: {pd_tar}")
+        #print(f"pd_tar: {pd_tar}")
         pd_tar_tensor = gymtorch.unwrap_tensor(pd_tar)
         self.gym.set_dof_position_target_tensor(self.sim, pd_tar_tensor)
 

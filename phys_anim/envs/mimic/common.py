@@ -807,12 +807,15 @@ class BaseMimic(MimicHumanoid):  # type: ignore[misc]
             current_state.body_vel,
             current_state.body_ang_vel,
         )
+
+        '''
         # first remove height based on current position
         gt[:, :, -1:] -= self.get_ground_heights(gt[:, 0, :2]).view(self.num_envs, 1, 1)
         # then remove offset to get back to the ground-truth data position
         gt[..., :2] -= self.respawn_offset_relative_to_data.clone()[..., :2].view(
             self.num_envs, 1, 2
         )
+        '''
 
         kb = self.process_kb(gt, gr)
 
@@ -871,6 +874,7 @@ class BaseMimic(MimicHumanoid):  # type: ignore[misc]
             w_last=self.w_last,
         )
 
+        '''
         current_contact_forces = self.get_bodies_contact_buf()
         forces_delta = torch.clip(
             self.prev_contact_forces - current_contact_forces, min=0
@@ -895,6 +899,7 @@ class BaseMimic(MimicHumanoid):  # type: ignore[misc]
         pow_rew[has_reset_grace] = 0
 
         rew_dict["pow_rew"] = pow_rew
+        '''
 
         self.last_scaled_rewards: Dict[str, Tensor] = {
             k: v * getattr(self.config.mimic_reward_config.component_weights, f"{k}_w")

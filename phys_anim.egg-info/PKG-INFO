@@ -1,0 +1,21 @@
+Metadata-Version: 2.1
+Name: phys_anim
+Version: 1.0
+Summary: a framework for physics-based motion controllers
+Home-page: 
+Author: Chen Tessler
+License-File: LICENSE
+Requires-Dist: lightning==2.3.3
+Requires-Dist: torch==2.2
+Requires-Dist: typer>=0.6.1
+Requires-Dist: wandb>=0.13.4
+Requires-Dist: transformers>=4.20.1
+Requires-Dist: hydra-core>=1.2.0
+Requires-Dist: matplotlib
+Requires-Dist: scikit-image
+Requires-Dist: opencv-python==4.5.5.64
+Requires-Dist: trimesh
+Requires-Dist: rtree==1.2.0
+Requires-Dist: setuptools==69.5.1
+Requires-Dist: rich
+Requires-Dist: smpl_sim@ git+https://github.com/ZhengyiLuo/SMPLSim.git@master

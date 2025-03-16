@@ -45,7 +45,7 @@ from phys_anim.utils.average_meter import AverageMeter, TensorAverageMeterDict
 from phys_anim.agents.utils.data_utils import DictDataset, ExperienceBuffer
 from phys_anim.agents.models.actor import PPO_Actor
 from phys_anim.agents.models.common import NormObsBase
-from phys_anim.envs.humanoid.common import Humanoid
+from phys_anim.envs.base_interface.common import BaseInterface
 from phys_anim.utils.running_mean_std import RunningMeanStd
 from phys_anim.agents.callbacks.base_callback import RL_EvalCallback
 from rich.progress import track
@@ -67,7 +67,7 @@ def get_params(obj) -> List[nn.Parameter]:
 
 
 class PPO:
-    def __init__(self, fabric: Fabric, env: Humanoid, config):
+    def __init__(self, fabric: Fabric, env: BaseInterface, config):
         self.fabric = fabric
         self.device: torch.device = fabric.device
         self.env = env
