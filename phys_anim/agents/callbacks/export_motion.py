@@ -171,79 +171,13 @@ class ExportMotion(RL_EvalCallback):
                     )
 
             else:
-                if "smpl" in self.env.config.robot.asset.robot_type:
-                    from smpl_sim.smpllib.smpl_joint_names import (
-                        SMPL_MUJOCO_NAMES,
-                        SMPL_BONE_ORDER_NAMES,
-                        SMPLH_BONE_ORDER_NAMES,
-                        SMPLH_MUJOCO_NAMES,
+                for key in self.env.motion_recording.keys():
+                    values = torch.stack(
+                        [values[idx] for values in self.env.motion_recording[key]]
                     )
-
-                    if self.env.config.robot.asset.robot_type in [
-                        "smpl_humanoid",
-                    ]:
-                        mujoco_joint_names = SMPL_MUJOCO_NAMES
-                        joint_names = SMPL_BONE_ORDER_NAMES
-                    elif self.env.config.robot.asset.robot_type in [
-                        "smplx_box_humanoid"
-                    ]:
-                        mujoco_joint_names = SMPLH_MUJOCO_NAMES
-                        joint_names = SMPLH_BONE_ORDER_NAMES
-                    else:
-                        raise NotImplementedError
-
-                    mujoco_2_smpl = [
-                        mujoco_joint_names.index(q)
-                        for q in joint_names
-                        if q in mujoco_joint_names
-                    ]
-                else:
-                    raise NotImplementedError
-
-                pre_rot = sRot.from_quat([0.5, 0.5, 0.5, 0.5])
-
-                body_quat = torch.stack(trajectory_data["rigid_body_rot"])[:, idx]
-                root_trans = torch.stack(trajectory_data["rigid_body_pos"])[
-                    :, idx, 0, :
-                ]
-
-                N = body_quat.shape[0]
-
-                skeleton_tree = self.env.motion_lib.state.motions[0].skeleton_tree
-
-                # offset = skeleton_tree.local_translation[0]
-                offset = root_trans[0].clone()
-                offset[2] = 0
-                root_trans_offset = root_trans - offset
-
-                pose_quat = (
-                    (sRot.from_quat(body_quat.reshape(-1, 4).numpy()) * pre_rot)
-                    .as_quat()
-                    .reshape(N, -1, 4)
-                )
-                new_sk_state = SkeletonState.from_rotation_and_root_translation(
-                    skeleton_tree,
-                    torch.from_numpy(pose_quat),
-                    root_trans.cpu(),
-                    is_local=False,
-                )
-                local_rot = new_sk_state.local_rotation
-                pose_aa = (
-                    sRot.from_quat(local_rot.reshape(-1, 4).numpy())
-                    .as_rotvec()
-                    .reshape(N, -1, 3)
-                )
-                pose_aa = pose_aa[:, mujoco_2_smpl, :].reshape(1, N, -1)
-
-                with open(save_dir / f"trajectory_pose_aa_{idx}.pkl", "wb") as f:
-                    pickle.dump(
-                        {
-                            "pose": pose_aa,
-                            "trans": root_trans_offset.unsqueeze(0).cpu().numpy(),
-                            "shape": np.zeros((N, 10)),
-                            "gender": "neutral",
-                        },
-                        f,
+                    np.save(
+                        str(save_dir / f"{motion_name}_{key}.npy"),
+                        values.cpu().numpy()
                     )
 
         for key in self.env.motion_recording.keys():

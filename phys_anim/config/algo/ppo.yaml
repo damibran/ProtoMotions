@@ -87,7 +87,7 @@ algo:
     manual_save_every: 10
     use_rand_action_masks: False
     obs_clamp_value: null
-    max_epochs: 600 #${eval:${training_max_steps}//${ngpu}//${num_envs}//${.num_steps}}
+    max_epochs: 700 #${eval:${training_max_steps}//${ngpu}//${num_envs}//${.num_steps}}
 
     eval_callbacks: null
 
