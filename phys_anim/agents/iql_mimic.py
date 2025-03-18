@@ -28,6 +28,12 @@ import numpy as np
 #    for i in range(n):
 #        inlist.append(inlist.pop(0))
 
+def soft_update_from_to(source, target, tau):
+    for target_param, param in zip(target.parameters(), source.parameters()):
+        target_param.data.copy_(
+            target_param.data * (1.0 - tau) + param.data * tau
+        )
+
 class IQL_Mimic:
 
     def __init__(self, fabric: Fabric, config):
@@ -125,30 +131,56 @@ class IQL_Mimic:
         self.actor.mark_forward_method("eval_forward")
         self.actor.mark_forward_method("training_forward")
 
-        critic_s: NormObsBase = instantiate(
+        qf1: NormObsBase = instantiate(
+            self.config.critic_sa, num_in=self.num_obs, num_out=1
+        )
+        qf1_optimizer = instantiate(
+            self.config.critic_optimizer,
+            params=list(qf1.parameters()),
+        )
+        self.qf1, self.qf1_optimizer = self.fabric.setup(qf1, qf1_optimizer)
+
+        qf2: NormObsBase = instantiate(
+            self.config.critic_sa, num_in=self.num_obs, num_out=1
+        )
+        qf2_optimizer = instantiate(
+            self.config.critic_optimizer,
+            params=list(qf2.parameters()),
+        )
+        self.qf2, self.qf2_optimizer = self.fabric.setup(qf2, qf2_optimizer)
+
+        target_qf1: NormObsBase = instantiate(
+            self.config.critic_sa, num_in=self.num_obs, num_out=1
+        )
+        self.target_qf1 = self.fabric.setup(target_qf1)
+
+        target_qf2: NormObsBase = instantiate(
+            self.config.critic_sa, num_in=self.num_obs, num_out=1
+        )
+        self.target_qf2 = self.fabric.setup(target_qf2)
+
+        vf: NormObsBase = instantiate(
             self.config.critic_s, num_in=self.num_obs, num_out=1
         )
-        critic_optimizer = instantiate(
+        vf_optimizer = instantiate(
             self.config.critic_optimizer,
-            params=list(critic_s.parameters()),
+            params=list(vf.parameters()),
         )
-        self.critic_s, self.critic_s_optimizer = self.fabric.setup(critic_s, critic_optimizer)
+        self.vf, self.vf_optimizer = self.fabric.setup(vf, vf_optimizer)
 
-        critic_sa: NormObsBase = instantiate(
-            self.config.critic_sa, num_in=self.num_obs, num_out=1
+        target_vf: NormObsBase = instantiate(
+            self.config.critic_s, num_in=self.num_obs, num_out=1
         )
-        critic_sa_optimizer = instantiate(
-            self.config.critic_optimizer,
-            params=list(critic_sa.parameters()),
-        )
-        self.critic_sa, self.critic_sa_optimizer = self.fabric.setup(critic_sa, critic_sa_optimizer)
-        self.critic_sa_criterion = nn.MSELoss()
+        self.target_vf = self.fabric.setup(target_vf)
 
-        target_critic: NormObsBase = instantiate(
-            self.config.critic_sa, num_in=self.num_obs, num_out=1
-        )
+        self.qf_criterion = nn.MSELoss()
+        self.vf_criterion = nn.MSELoss()
 
-        self.target_critic = self.fabric.setup(target_critic)
+        self._n_train_steps_total = 0
+        self.q_update_period = 1
+        self.policy_update_period = 1
+        self.target_update_period = 1
+        self.soft_target_tau = 1e-2
 
         # state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_0/last.ckpt", map_location=self.device)
         # self.actor.load_state_dict(state_dict["actor"])
@@ -165,7 +197,10 @@ class IQL_Mimic:
             print(f'Value Step')
 
             v_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
-            q_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
+            q1_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
+            q2_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
+            a_loss_tensor_adw_neglog = torch.zeros(self.update_steps_per_stage * batch_count)
+            a_loss_tensor_adw = torch.zeros(self.update_steps_per_stage * batch_count)
             for i in range(self.update_steps_per_stage):
                 for batch_id in range(batch_count):
 
@@ -179,107 +214,102 @@ class IQL_Mimic:
                         "rewards": self.dataset["rew_buf"][0:self.config.batch_size],
                     }
 
-                    reward = batch["rewards"]
-
-                    """
-                    VF Loss
-                    """
-                    self.target_critic.train()
-                    self.critic_s.train()
-                    q_pred = self.target_critic(
-                        {"obs": batch["obs_buf"], "actions": batch["actions"],
-                         "mimic_target_poses": batch["mimic_target_poses"]}).detach()
-                    vf_pred = self.critic_s({"obs": batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]})
-                    vf_err = vf_pred - q_pred
-                    vf_sign = (vf_err > 0).float()
-                    vf_weight = (1 - vf_sign) * self.expectile + vf_sign * (1 - self.expectile)
-                    value_loss = (vf_weight * (vf_err ** 2)).mean()
-
-                    v_loss_tensor[batch_id * self.update_steps_per_stage + i] = value_loss.mean().detach()
-
-                    """
-                    QF Loss
-                    """
+                    rewards = batch["rewards"]
 
                     next_obs = torch.roll(batch["obs_buf"], shifts=-1, dims=0)
                     next_targets = torch.roll(batch["mimic_target_poses"], shifts=-1, dims=0)
 
-                    q_target = reward + (1. - batch["reset_buf"]) * self.discount * self.critic_s(
-                        {"obs": next_obs, "mimic_target_poses": next_targets}).detach()
+                    """
+                    QF Loss
+                    """
+                    q1_pred = self.qf1({"obs": batch["obs_buf"], "actions": batch["actions"],
+                         "mimic_target_poses": batch["mimic_target_poses"]})
+                    q2_pred = self.qf2({"obs": batch["obs_buf"], "actions": batch["actions"],
+                         "mimic_target_poses": batch["mimic_target_poses"]})
+                    target_vf_pred = self.vf({"obs": next_obs, "mimic_target_poses": next_targets}).detach()
+
+                    q_target = rewards + (1. - batch['reset_buf']) * self.discount * target_vf_pred
                     q_target = q_target.detach()
-                    q_pred = self.critic_sa({"obs": batch["obs_buf"], "actions": batch["actions"],
-                                             "mimic_target_poses": batch["mimic_target_poses"]})
-
-                    q_loss = self.critic_sa_criterion(q_target, q_pred)
-
-                    q_loss_tensor[batch_id * self.update_steps_per_stage + i] = q_loss.mean().detach()
+                    qf1_loss = self.qf_criterion(q1_pred, q_target)
+                    qf2_loss = self.qf_criterion(q2_pred, q_target)
 
                     """
-                    Step
+                    VF Loss
                     """
+                    q_pred = torch.min(
+                        self.target_qf1({"obs": batch["obs_buf"], "actions": batch["actions"],
+                         "mimic_target_poses": batch["mimic_target_poses"]}),
+                        self.target_qf2({"obs": batch["obs_buf"], "actions": batch["actions"],
+                         "mimic_target_poses": batch["mimic_target_poses"]}),
+                    ).detach()
+                    vf_pred = self.vf({"obs": batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]})
+                    vf_err = vf_pred - q_pred
+                    vf_sign = (vf_err > 0).float()
+                    vf_weight = (1 - vf_sign) * self.expectile + vf_sign * (1 - self.expectile)
+                    vf_loss = (vf_weight * (vf_err ** 2)).mean()
 
-                    self.critic_s_optimizer.zero_grad()
-                    self.fabric.backward(value_loss.mean())
-                    self.critic_s_optimizer.step()
-
-                    self.critic_sa_optimizer.zero_grad()
-                    self.fabric.backward(q_loss.mean())
-                    self.critic_sa_optimizer.step()
-
-                    for param_cur, param_target in zip(self.critic_sa.parameters(), self.target_critic.parameters()):
-                        param_target.data = (1 - self.alpha) * param_target.data + self.alpha * param_cur.data
-
-            self.log_dict.update({"ac/v_loss": v_loss_tensor.mean()})
-            self.log_dict.update({"ac/q_loss": q_loss_tensor.mean()})
-
-            a_loss_tensor_adw_exp = torch.zeros(self.update_steps_per_stage * batch_count)
-            a_loss_tensor_adw_neglog = torch.zeros(self.update_steps_per_stage * batch_count)
-            a_loss_tensor_adw = torch.zeros(self.update_steps_per_stage * batch_count)
-
-            print(f'Actor Step')
-            for i in range(self.update_steps_per_stage):
-                for batch_id in range(batch_count):
-                    self.dataset_roll()
-
-                    batch = {
-                        "obs_buf": self.dataset["obs_buf"][0:self.config.batch_size],
-                        "mimic_target_poses": self.dataset["mimic_target_poses"][0:self.config.batch_size],
-                        "reset_buf": self.dataset["reset_buf"][0:self.config.batch_size],
-                        "actions": self.dataset["actions"][0:self.config.batch_size],
-                        "rewards": self.dataset["rew_buf"][0:self.config.batch_size],
-                    }
-
+                    """
+                    Policy Loss
+                    """
                     self.actor.training = True
                     actor_out = self.actor.training_forward(
                         {"obs": batch["obs_buf"],
                          "actions": batch["actions"],
                          "mimic_target_poses": batch["mimic_target_poses"]})
 
-                    self.target_critic.eval()
-                    self.critic_s.eval()
-                    q_val = self.target_critic(
-                        {"obs": batch["obs_buf"], "actions": batch["actions"],
-                         "mimic_target_poses": batch["mimic_target_poses"]})
-                    v_val = self.critic_s({"obs": batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]})
+                    policy_logpp = -actor_out["neglogp"]
 
-                    adv = q_val.detach() - v_val.detach()
+                    adv = q_pred - vf_pred
                     exp_adv = torch.exp(adv / self.beta)
-                    exp_adv = torch.clamp(exp_adv, max=100)
+                    #if self.clip_score is not None:
+                    #    exp_adv = torch.clamp(exp_adv, max=self.clip_score)
 
-                    actor_adw_loss = (exp_adv * actor_out["neglogp"]).mean()
+                    weights = exp_adv.detach()#exp_adv[:, 0].detach()
+                    policy_loss = (-policy_logpp * weights).mean()
 
-                    loss = actor_adw_loss
+                    """
+                    Update networks
+                    """
+                    if self._n_train_steps_total % self.q_update_period == 0:
+                        self.qf1_optimizer.zero_grad()
+                        qf1_loss.backward()
+                        self.qf1_optimizer.step()
 
-                    self.actor_optimizer.zero_grad()
-                    self.fabric.backward(loss.mean(), retain_graph=True)
-                    self.actor_optimizer.step()
+                        self.qf2_optimizer.zero_grad()
+                        qf2_loss.backward()
+                        self.qf2_optimizer.step()
 
-                    a_loss_tensor_adw_exp[batch_id * self.update_steps_per_stage + i] = exp_adv.mean().detach()
-                    a_loss_tensor_adw_neglog[batch_id * self.update_steps_per_stage + i] = actor_out[
-                        "neglogp"].mean().detach()
-                    a_loss_tensor_adw[batch_id * self.update_steps_per_stage + i] = actor_adw_loss.mean().detach()
+                        self.vf_optimizer.zero_grad()
+                        vf_loss.backward()
+                        self.vf_optimizer.step()
 
-            self.log_dict.update({"actor_loss/adw_exp": a_loss_tensor_adw_exp.mean()})
+                    if self._n_train_steps_total % self.policy_update_period == 0:
+                        self.actor_optimizer.zero_grad()
+                        policy_loss.backward()
+                        self.actor_optimizer.step()
+
+                    """
+                    Soft Updates
+                    """
+                    self._n_train_steps_total += 1
+                    if self._n_train_steps_total % self.target_update_period == 0:
+                        soft_update_from_to(
+                            self.qf1, self.target_qf1, self.soft_target_tau
+                        )
+                        soft_update_from_to(
+                            self.qf2, self.target_qf2, self.soft_target_tau
+                        )
+
+                    q1_loss_tensor[batch_id * self.update_steps_per_stage + i] = qf1_loss.mean().detach()
+                    q2_loss_tensor[batch_id * self.update_steps_per_stage + i] = qf2_loss.mean().detach()
+                    v_loss_tensor[batch_id * self.update_steps_per_stage + i] = vf_loss.mean().detach()
+                    a_loss_tensor_adw[batch_id * self.update_steps_per_stage + i] = policy_loss.mean().detach()
+                    a_loss_tensor_adw_neglog[batch_id * self.update_steps_per_stage + i] = actor_out["neglogp"].mean().detach()
+
+
+            self.log_dict.update({"ac/v_loss": v_loss_tensor.mean()})
+            self.log_dict.update({"ac/q1_loss": q1_loss_tensor.mean()})
+            self.log_dict.update({"ac/q2_loss": q2_loss_tensor.mean()})
             self.log_dict.update({"actor_loss/neg_log": a_loss_tensor_adw_neglog.mean()})
             self.log_dict.update({"actor_loss/loss_adw": a_loss_tensor_adw.mean()})
 
@@ -316,9 +346,9 @@ class IQL_Mimic:
     def get_state_dict(self, state_dict):
         extra_state_dict = {
             "actor": self.actor.state_dict(),
-            "critic": self.critic_s.state_dict(),
+            "critic": self.vf.state_dict(),
             "actor_optimizer": self.actor_optimizer.state_dict(),
-            "critic_optimizer": self.critic_s_optimizer.state_dict(),
+            "critic_optimizer": self.vf_optimizer.state_dict(),
             "epoch": self.current_epoch,
             "episode_reward_meter": None,
             "episode_length_meter": None,
