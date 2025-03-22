@@ -129,7 +129,7 @@ algo:
 
     #IQL parameters
     expectile: 0.7
-    alpha: 0.5
+    alpha: 0.005
     batch_size: 8192
     max_epochs: 48000
     normalize_obs: True

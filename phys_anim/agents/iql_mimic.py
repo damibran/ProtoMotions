@@ -6,7 +6,7 @@ import torch
 from torch import nn as nn
 from torch import Tensor
 from torch.cuda import device
-
+import torch.nn.functional as F
 from isaac_utils import torch_utils
 from lightning.fabric import Fabric
 from utils.motion_lib import MotionLib
@@ -177,18 +177,15 @@ class IQL_Mimic:
         )
         self.target_vf = self.fabric.setup(target_vf)
 
-        self.qf_criterion = nn.MSELoss()
-        self.vf_criterion = nn.MSELoss()
-
-        self._n_train_steps_total = 0
-        self.q_update_period = 1
-        self.policy_update_period = 1
-        self.target_update_period = 1
-        self.soft_target_tau = 1
-
         # state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_0/last.ckpt", map_location=self.device)
         # self.actor.load_state_dict(state_dict["actor"])
         # self.save(name="last_a.ckpt")
+
+    def twin_forward(self, input_dict, q1, q2):
+        return torch.min(q1(input_dict), q2(input_dict))
+
+    def asymmetric_l2_loss(self, u, tau):
+        return torch.mean(torch.abs(tau - (u < 0).float()) * u ** 2)
 
     def fit(self):
 
@@ -202,7 +199,7 @@ class IQL_Mimic:
 
             v_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             q1_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
-            q2_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
+            #q2_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_adw_neglog = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_adw = torch.zeros(self.update_steps_per_stage * batch_count)
             for i in range(self.update_steps_per_stage):
@@ -218,106 +215,61 @@ class IQL_Mimic:
                         "rewards": self.dataset["rew_buf"][0:self.config.batch_size],
                     }
 
-                    rewards = batch["rewards"]
-
                     next_obs = torch.roll(batch["obs_buf"], shifts=-1, dims=0)
                     next_targets = torch.roll(batch["mimic_target_poses"], shifts=-1, dims=0)
 
-                    """
-                    QF Loss
-                    """
-                    q1_pred = self.qf1({"obs": batch["obs_buf"], "actions": batch["actions"],
+                    with torch.no_grad():
+                        target_q = self.twin_forward({"obs": batch["obs_buf"], "actions": batch["actions"],
+                         "mimic_target_poses": batch["mimic_target_poses"]}, self.target_qf1, self.target_qf2)
+                        next_v = self.vf({"obs": next_obs, "mimic_target_poses": next_targets})
+
+                    # v, next_v = compute_batched(self.vf, [observations, next_observations])
+
+                    # Update value function
+                    v = self.vf({"obs": batch["obs_buf"], "actions": batch["actions"],
                          "mimic_target_poses": batch["mimic_target_poses"]})
-                    q2_pred = self.qf2({"obs": batch["obs_buf"], "actions": batch["actions"],
-                         "mimic_target_poses": batch["mimic_target_poses"]})
-                    target_vf_pred = self.vf({"obs": next_obs, "mimic_target_poses": next_targets}).detach()
+                    adv = target_q - v
+                    v_loss = self.asymmetric_l2_loss(adv, self.expectile)
+                    self.vf_optimizer.zero_grad(set_to_none=True)
+                    v_loss.backward()
+                    self.vf_optimizer.step()
 
-                    q_target = rewards + (1. - batch['reset_buf']) * self.discount * target_vf_pred
-                    q_target = q_target.detach()
-                    qf1_loss = self.qf_criterion(q1_pred, q_target)
-                    qf2_loss = self.qf_criterion(q2_pred, q_target)
+                    # Update Q function
+                    targets = batch["rewards"] + (1. - batch["reset_buf"].float()) * self.discount * next_v.detach()
+                    qs = self.twin_forward({"obs": batch["obs_buf"], "actions": batch["actions"],
+                         "mimic_target_poses": batch["mimic_target_poses"]}, self.qf1, self.qf2)
+                    q_loss = sum(F.mse_loss(q, targets) for q in qs) / len(qs)
+                    self.qf1_optimizer.zero_grad(set_to_none=True)
+                    self.qf2_optimizer.zero_grad(set_to_none=True)
+                    q_loss.backward()
+                    self.qf1_optimizer.step()
+                    self.qf2_optimizer.step()
 
-                    """
-                    VF Loss
-                    """
-                    q_pred = torch.min(
-                        self.target_qf1({"obs": batch["obs_buf"], "actions": batch["actions"],
-                         "mimic_target_poses": batch["mimic_target_poses"]}),
-                        self.target_qf2({"obs": batch["obs_buf"], "actions": batch["actions"],
-                         "mimic_target_poses": batch["mimic_target_poses"]}),
-                    ).detach()
-                    q_pred = self.target_qf1({"obs": batch["obs_buf"], "actions": batch["actions"],
-                        "mimic_target_poses": batch["mimic_target_poses"]}).detach()
-                    vf_pred = self.vf({"obs": batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]})
-                    vf_err = vf_pred - q_pred
-                    vf_sign = (vf_err > 0).float()
-                    vf_weight = (1 - vf_sign) * self.expectile + vf_sign * (1 - self.expectile)
-                    vf_loss = (vf_weight * (vf_err ** 2)).mean()
+                    # Update target Q network
+                    soft_update_from_to(self.target_qf1, self.qf1, self.alpha)
+                    soft_update_from_to(self.target_qf2, self.qf2, self.alpha)
 
-                    """
-                    Policy Loss
-                    """
-                    self.actor.training = True
-                    actor_out = self.actor.training_forward(
-                        {"obs": batch["obs_buf"],
+                    # Update policy
+                    exp_adv = torch.exp(self.beta * adv.detach()).clamp(max=100.)
+                    policy_out = self.actor.training_forward({"obs": batch["obs_buf"],
                          "actions": batch["actions"],
                          "mimic_target_poses": batch["mimic_target_poses"]})
+                    bc_losses = policy_out["neglogp"]
+                    policy_loss = torch.mean(exp_adv * bc_losses)
+                    self.actor_optimizer.zero_grad(set_to_none=True)
+                    policy_loss.backward()
+                    self.actor_optimizer.step()
 
-                    policy_logpp = -actor_out["neglogp"]
-
-                    adv = q_pred - vf_pred
-                    exp_adv = torch.exp(adv / self.beta)
-                    #if self.clip_score is not None:
-                    #    exp_adv = torch.clamp(exp_adv, max=self.clip_score)
-
-                    weights = exp_adv.detach()#exp_adv[:, 0].detach()
-                    policy_loss = (-policy_logpp * weights).mean()
-
-                    """
-                    Update networks
-                    """
-                    if self._n_train_steps_total % self.q_update_period == 0:
-                        self.qf1_optimizer.zero_grad()
-                        qf1_loss.backward()
-                        self.qf1_optimizer.step()
-
-                        self.qf2_optimizer.zero_grad()
-                        qf2_loss.backward()
-                        self.qf2_optimizer.step()
-
-                        self.vf_optimizer.zero_grad()
-                        vf_loss.backward()
-                        self.vf_optimizer.step()
-
-                    if self._n_train_steps_total % self.policy_update_period == 0:
-                        self.actor_optimizer.zero_grad()
-                        policy_loss.backward()
-                        self.actor_optimizer.step()
-
-                    """
-                    Soft Updates
-                    """
-                    if self._n_train_steps_total % self.target_update_period == 0:
-                        soft_update_from_to(
-                            self.qf1, self.target_qf1, self.soft_target_tau
-                        )
-                        soft_update_from_to(
-                            self.qf2, self.target_qf2, self.soft_target_tau
-                        )
-
-                    self._n_train_steps_total += 1
-
-
-                    q1_loss_tensor[batch_id * self.update_steps_per_stage + i] = qf1_loss.mean().detach()
-                    q2_loss_tensor[batch_id * self.update_steps_per_stage + i] = qf2_loss.mean().detach()
-                    v_loss_tensor[batch_id * self.update_steps_per_stage + i] = vf_loss.mean().detach()
+                    q1_loss_tensor[batch_id * self.update_steps_per_stage + i] = q_loss.mean().detach()
+                    #q2_loss_tensor[batch_id * self.update_steps_per_stage + i] = qf2_loss.mean().detach()
+                    v_loss_tensor[batch_id * self.update_steps_per_stage + i] = v_loss.mean().detach()
                     a_loss_tensor_adw[batch_id * self.update_steps_per_stage + i] = policy_loss.mean().detach()
-                    a_loss_tensor_adw_neglog[batch_id * self.update_steps_per_stage + i] = actor_out["neglogp"].mean().detach()
+                    a_loss_tensor_adw_neglog[batch_id * self.update_steps_per_stage + i] = policy_out["neglogp"].mean().detach()
 
 
             self.log_dict.update({"ac/v_loss": v_loss_tensor.mean()})
             self.log_dict.update({"ac/q1_loss": q1_loss_tensor.mean()})
-            self.log_dict.update({"ac/q2_loss": q2_loss_tensor.mean()})
+            #self.log_dict.update({"ac/q2_loss": q2_loss_tensor.mean()})
             self.log_dict.update({"actor_loss/neg_log": a_loss_tensor_adw_neglog.mean()})
             self.log_dict.update({"actor_loss/loss_adw": a_loss_tensor_adw.mean()})
 
