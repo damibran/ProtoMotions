@@ -93,6 +93,10 @@ class IQL_Mimic:
                     # Remove the last entry for other tensors
                     subset[attr] = subset[attr][:-1]
 
+            # Zero out rew_buf elements where reset_buf is 1
+            reset_buf_inverted = 1 - subset["reset_buf"]  # Invert reset_buf (0 becomes 1, 1 becomes 0)
+            subset["rew_buf"] = subset["rew_buf"] * reset_buf_inverted  # Zero out where reset_buf is 1
+
             self.subsets.append(subset)
 
         print("Dataset Creating")
@@ -180,7 +184,7 @@ class IQL_Mimic:
         self.q_update_period = 1
         self.policy_update_period = 1
         self.target_update_period = 1
-        self.soft_target_tau = 1e-2
+        self.soft_target_tau = 1
 
         # state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_0/last.ckpt", map_location=self.device)
         # self.actor.load_state_dict(state_dict["actor"])
@@ -242,6 +246,8 @@ class IQL_Mimic:
                         self.target_qf2({"obs": batch["obs_buf"], "actions": batch["actions"],
                          "mimic_target_poses": batch["mimic_target_poses"]}),
                     ).detach()
+                    q_pred = self.target_qf1({"obs": batch["obs_buf"], "actions": batch["actions"],
+                        "mimic_target_poses": batch["mimic_target_poses"]}).detach()
                     vf_pred = self.vf({"obs": batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]})
                     vf_err = vf_pred - q_pred
                     vf_sign = (vf_err > 0).float()
@@ -291,7 +297,6 @@ class IQL_Mimic:
                     """
                     Soft Updates
                     """
-                    self._n_train_steps_total += 1
                     if self._n_train_steps_total % self.target_update_period == 0:
                         soft_update_from_to(
                             self.qf1, self.target_qf1, self.soft_target_tau
@@ -299,6 +304,9 @@ class IQL_Mimic:
                         soft_update_from_to(
                             self.qf2, self.target_qf2, self.soft_target_tau
                         )
+
+                    self._n_train_steps_total += 1
+
 
                     q1_loss_tensor[batch_id * self.update_steps_per_stage + i] = qf1_loss.mean().detach()
                     q2_loss_tensor[batch_id * self.update_steps_per_stage + i] = qf2_loss.mean().detach()
