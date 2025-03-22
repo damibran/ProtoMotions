@@ -181,14 +181,14 @@ class IQL_Mimic:
         self.vf_criterion = nn.MSELoss()
 
         self._n_train_steps_total = 0
-        self.q_update_period = 1
-        self.policy_update_period = 1
-        self.target_update_period = 1
-        self.soft_target_tau = 1
+        self.soft_target_tau = 0.005
 
         # state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_0/last.ckpt", map_location=self.device)
         # self.actor.load_state_dict(state_dict["actor"])
         # self.save(name="last_a.ckpt")
+
+    def asymmetric_l2_loss(self, u, tau):
+        return torch.mean(torch.abs(tau - (u < 0).float()) * u ** 2)
 
     def fit(self):
 
@@ -202,7 +202,6 @@ class IQL_Mimic:
 
             v_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             q1_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
-            q2_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_adw_neglog = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_adw = torch.zeros(self.update_steps_per_stage * batch_count)
             for i in range(self.update_steps_per_stage):
@@ -224,6 +223,23 @@ class IQL_Mimic:
                     next_targets = torch.roll(batch["mimic_target_poses"], shifts=-1, dims=0)
 
                     """
+                    VF Loss
+                    """
+                    q_pred = torch.min(
+                        self.target_qf1({"obs": batch["obs_buf"], "actions": batch["actions"],
+                         "mimic_target_poses": batch["mimic_target_poses"]}),
+                        self.target_qf2({"obs": batch["obs_buf"], "actions": batch["actions"],
+                         "mimic_target_poses": batch["mimic_target_poses"]}),
+                    ).detach()
+                    vf_pred = self.vf({"obs": batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]})
+                    adv = q_pred - vf_pred
+                    vf_loss = self.asymmetric_l2_loss(adv, self.expectile)
+
+                    self.vf_optimizer.zero_grad()
+                    vf_loss.backward()
+                    self.vf_optimizer.step()
+
+                    """
                     QF Loss
                     """
                     q1_pred = self.qf1({"obs": batch["obs_buf"], "actions": batch["actions"],
@@ -234,25 +250,21 @@ class IQL_Mimic:
 
                     q_target = rewards + (1. - batch['reset_buf']) * self.discount * target_vf_pred
                     q_target = q_target.detach()
-                    qf1_loss = self.qf_criterion(q1_pred, q_target)
-                    qf2_loss = self.qf_criterion(q2_pred, q_target)
 
-                    """
-                    VF Loss
-                    """
-                    q_pred = torch.min(
-                        self.target_qf1({"obs": batch["obs_buf"], "actions": batch["actions"],
-                         "mimic_target_poses": batch["mimic_target_poses"]}),
-                        self.target_qf2({"obs": batch["obs_buf"], "actions": batch["actions"],
-                         "mimic_target_poses": batch["mimic_target_poses"]}),
-                    ).detach()
-                    q_pred = self.target_qf1({"obs": batch["obs_buf"], "actions": batch["actions"],
-                        "mimic_target_poses": batch["mimic_target_poses"]}).detach()
-                    vf_pred = self.vf({"obs": batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]})
-                    vf_err = vf_pred - q_pred
-                    vf_sign = (vf_err > 0).float()
-                    vf_weight = (1 - vf_sign) * self.expectile + vf_sign * (1 - self.expectile)
-                    vf_loss = (vf_weight * (vf_err ** 2)).mean()
+                    q_loss = (self.qf_criterion(q1_pred, q_target) + self.qf_criterion(q2_pred, q_target)) / 2
+
+                    self.qf1_optimizer.zero_grad()
+                    self.qf2_optimizer.zero_grad()
+                    q_loss.backward()
+                    self.qf1_optimizer.step()
+                    self.qf2_optimizer.step()
+
+                    soft_update_from_to(
+                        self.qf1, self.target_qf1, self.soft_target_tau
+                    )
+                    soft_update_from_to(
+                        self.qf2, self.target_qf2, self.soft_target_tau
+                    )
 
                     """
                     Policy Loss
@@ -267,49 +279,16 @@ class IQL_Mimic:
 
                     adv = q_pred - vf_pred
                     exp_adv = torch.exp(adv / self.beta)
-                    #if self.clip_score is not None:
-                    #    exp_adv = torch.clamp(exp_adv, max=self.clip_score)
+                    exp_adv = torch.clamp(exp_adv, max=100.0)
 
                     weights = exp_adv.detach()#exp_adv[:, 0].detach()
                     policy_loss = (-policy_logpp * weights).mean()
 
-                    """
-                    Update networks
-                    """
-                    if self._n_train_steps_total % self.q_update_period == 0:
-                        self.qf1_optimizer.zero_grad()
-                        qf1_loss.backward()
-                        self.qf1_optimizer.step()
+                    self.actor_optimizer.zero_grad()
+                    policy_loss.backward()
+                    self.actor_optimizer.step()
 
-                        self.qf2_optimizer.zero_grad()
-                        qf2_loss.backward()
-                        self.qf2_optimizer.step()
-
-                        self.vf_optimizer.zero_grad()
-                        vf_loss.backward()
-                        self.vf_optimizer.step()
-
-                    if self._n_train_steps_total % self.policy_update_period == 0:
-                        self.actor_optimizer.zero_grad()
-                        policy_loss.backward()
-                        self.actor_optimizer.step()
-
-                    """
-                    Soft Updates
-                    """
-                    if self._n_train_steps_total % self.target_update_period == 0:
-                        soft_update_from_to(
-                            self.qf1, self.target_qf1, self.soft_target_tau
-                        )
-                        soft_update_from_to(
-                            self.qf2, self.target_qf2, self.soft_target_tau
-                        )
-
-                    self._n_train_steps_total += 1
-
-
-                    q1_loss_tensor[batch_id * self.update_steps_per_stage + i] = qf1_loss.mean().detach()
-                    q2_loss_tensor[batch_id * self.update_steps_per_stage + i] = qf2_loss.mean().detach()
+                    q1_loss_tensor[batch_id * self.update_steps_per_stage + i] = q_loss.mean().detach()
                     v_loss_tensor[batch_id * self.update_steps_per_stage + i] = vf_loss.mean().detach()
                     a_loss_tensor_adw[batch_id * self.update_steps_per_stage + i] = policy_loss.mean().detach()
                     a_loss_tensor_adw_neglog[batch_id * self.update_steps_per_stage + i] = actor_out["neglogp"].mean().detach()
@@ -317,7 +296,6 @@ class IQL_Mimic:
 
             self.log_dict.update({"ac/v_loss": v_loss_tensor.mean()})
             self.log_dict.update({"ac/q1_loss": q1_loss_tensor.mean()})
-            self.log_dict.update({"ac/q2_loss": q2_loss_tensor.mean()})
             self.log_dict.update({"actor_loss/neg_log": a_loss_tensor_adw_neglog.mean()})
             self.log_dict.update({"actor_loss/loss_adw": a_loss_tensor_adw.mean()})
 
