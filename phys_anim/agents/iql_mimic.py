@@ -172,11 +172,6 @@ class IQL_Mimic:
         )
         self.vf, self.vf_optimizer = self.fabric.setup(vf, vf_optimizer)
 
-        target_vf: NormObsBase = instantiate(
-            self.config.critic_s, num_in=self.num_obs, num_out=1
-        )
-        self.target_vf = self.fabric.setup(target_vf)
-
         self.qf_criterion = nn.MSELoss()
         self.vf_criterion = nn.MSELoss()
 
@@ -184,7 +179,7 @@ class IQL_Mimic:
         self.q_update_period = 1
         self.policy_update_period = 1
         self.target_update_period = 1
-        self.soft_target_tau = 1
+        self.soft_target_tau = 0.005
 
         # state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_0/last.ckpt", map_location=self.device)
         # self.actor.load_state_dict(state_dict["actor"])
@@ -246,8 +241,6 @@ class IQL_Mimic:
                         self.target_qf2({"obs": batch["obs_buf"], "actions": batch["actions"],
                          "mimic_target_poses": batch["mimic_target_poses"]}),
                     ).detach()
-                    q_pred = self.target_qf1({"obs": batch["obs_buf"], "actions": batch["actions"],
-                        "mimic_target_poses": batch["mimic_target_poses"]}).detach()
                     vf_pred = self.vf({"obs": batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]})
                     vf_err = vf_pred - q_pred
                     vf_sign = (vf_err > 0).float()
@@ -267,8 +260,7 @@ class IQL_Mimic:
 
                     adv = q_pred - vf_pred
                     exp_adv = torch.exp(adv / self.beta)
-                    #if self.clip_score is not None:
-                    #    exp_adv = torch.clamp(exp_adv, max=self.clip_score)
+                    exp_adv = torch.clamp(exp_adv, max=100)
 
                     weights = exp_adv.detach()#exp_adv[:, 0].detach()
                     policy_loss = (-policy_logpp * weights).mean()

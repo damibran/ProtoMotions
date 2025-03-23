@@ -129,8 +129,8 @@ algo:
 
     #IQL parameters
     expectile: 0.7
-    alpha: 0.5
-    batch_size: 8192
+    alpha: 0.005
+    batch_size: 256
     max_epochs: 48000
     normalize_obs: True
     obs_clamp_value: null
@@ -138,7 +138,7 @@ algo:
     discriminator_grad_penalty: 5
     discriminator_weight_decay: 0.0001
     discriminator_logit_weight_decay: 0.01
-    discount: 0.9
+    discount: 0.99
     beta: 3 # aka temperatue
 
     eval_callbacks: null
