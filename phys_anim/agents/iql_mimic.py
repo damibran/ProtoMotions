@@ -236,8 +236,10 @@ class IQL_Mimic:
 
                     # Update Q function
                     targets = batch["rewards"] + (1. - batch["reset_buf"].float()) * self.discount * next_v.detach()
-                    qs = self.twin_forward({"obs": batch["obs_buf"], "actions": batch["actions"],
-                         "mimic_target_poses": batch["mimic_target_poses"]}, self.qf1, self.qf2)
+                    qs = (self.qf1({"obs": batch["obs_buf"], "actions": batch["actions"],
+                         "mimic_target_poses": batch["mimic_target_poses"]}),
+                          self.qf2({"obs": batch["obs_buf"], "actions": batch["actions"],
+                         "mimic_target_poses": batch["mimic_target_poses"]}))
                     q_loss = sum(F.mse_loss(q, targets) for q in qs) / len(qs)
                     self.qf1_optimizer.zero_grad(set_to_none=True)
                     self.qf2_optimizer.zero_grad(set_to_none=True)
