@@ -1,0 +1,7 @@
+# @package _global_
+
+defaults:
+  - /algo: cql_mimic
+
+
+experiment_name: cql_mimic

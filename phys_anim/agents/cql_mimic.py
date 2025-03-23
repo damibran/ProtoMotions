@@ -34,7 +34,7 @@ def soft_update_from_to(source, target, tau):
             target_param.data * (1.0 - tau) + param.data * tau
         )
 
-class IQL_Mimic:
+class CQL_Mimic:
 
     def __init__(self, fabric: Fabric, config):
         self.all_config = config
@@ -184,7 +184,7 @@ class IQL_Mimic:
         self.q_update_period = 1
         self.policy_update_period = 1
         self.target_update_period = 1
-        self.soft_target_tau = 1
+        self.soft_target_tau = 0.005
 
         self.use_automatic_entropy_tuning = True
         target_entropy = None
@@ -193,7 +193,7 @@ class IQL_Mimic:
                 self.target_entropy = target_entropy
             else:
                 self.target_entropy = -np.prod(self.num_act).item()
-            self.log_alpha = torch.zeros(1, requires_grad=True)
+            self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
             self.alpha_optimizer = torch.optim.Adam(
                 [self.log_alpha],
                 lr=self.all_config.algo.config.actor_optimizer.lr,
@@ -203,7 +203,7 @@ class IQL_Mimic:
         self.with_lagrange = True
         if self.with_lagrange:
             self.target_action_gap = lagrange_thresh
-            self.log_alpha_prime = torch.zeros(1, requires_grad=True)
+            self.log_alpha_prime = torch.zeros(1, requires_grad=True, device=self.device)
             self.alpha_prime_optimizer = torch.optim.Adam(
                 [self.log_alpha_prime],
                 lr=self.all_config.algo.config.critic_optimizer.lr,
@@ -231,6 +231,52 @@ class IQL_Mimic:
         # self.actor.load_state_dict(state_dict["actor"])
         # self.save(name="last_a.ckpt")
 
+    def _get_policy_actions(self, obs, num_actions):
+        # Ensure obs is a dict and prepare its values
+        obs_dict = {key: val.unsqueeze(1).repeat(1, num_actions, 1).view(val.shape[0] * num_actions, val.shape[1])
+                    for key, val in obs.items()}
+
+        # Pass the dict to the network
+        actor_out = self.actor.eval_forward(obs_dict)
+
+        new_obs_actions = actor_out['actions']
+        new_obs_log_pi = -actor_out['neglogp']
+
+        return new_obs_actions, new_obs_log_pi.view(next(iter(obs.values())).shape[0], num_actions, 1)
+
+    def _get_tensor_values(self, obs, actions, network=None):
+        # Extract the observation and mimc_target from the input dictionary
+        obs_tensor = obs['obs']
+        mimc_target_tensor = obs['mimic_target_poses']
+
+        # Get the shapes
+        action_shape = actions.shape[0]
+        obs_shape = obs_tensor.shape[0]
+
+        # Calculate the number of repeats
+        num_repeat = int(action_shape / obs_shape)
+
+        # Repeat the observation and mimc_target tensors
+        obs_temp = obs_tensor.unsqueeze(1).repeat(1, num_repeat, 1).view(obs_tensor.shape[0] * num_repeat,
+                                                                         obs_tensor.shape[1])
+        mimc_target_temp = mimc_target_tensor.unsqueeze(1).repeat(1, num_repeat, 1).view(
+            mimc_target_tensor.shape[0] * num_repeat, mimc_target_tensor.shape[1])
+
+        # Prepare the input dictionary for the network
+        network_input = {
+            'obs': obs_temp,
+            'mimic_target_poses': mimc_target_temp,
+            'actions': actions
+        }
+
+        # Get predictions from the network
+        preds = network(network_input)
+
+        # Reshape the predictions
+        preds = preds.view(obs_tensor.shape[0], num_repeat, 1)
+
+        return preds
+
     def fit(self):
 
         for self.current_epoch in range(self.config.max_epochs):
@@ -241,7 +287,7 @@ class IQL_Mimic:
 
             print(f'Value Step')
 
-            v_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
+            #v_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             q1_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             q2_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_adw_neglog = torch.zeros(self.update_steps_per_stage * batch_count)
@@ -270,6 +316,7 @@ class IQL_Mimic:
                     Policy and Alpha Loss
                     """
                     # new_obs_actions, policy_mean, policy_log_std, log_pi, *_
+                    self.actor.eval()
                     actor_out = self.actor.eval_forward(
                         {"obs":batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]}
                     )
@@ -306,6 +353,7 @@ class IQL_Mimic:
                         conventionally, there's not much difference in performance with having 20k 
                         gradient steps here, or not having it
                         """
+                        self.actor.train()
                         actor_out = self.actor.training_forward({"obs": batch["obs_buf"], "actions": actions,
                          "mimic_target_poses": batch["mimic_target_poses"]})
                         policy_log_prob = -actor_out["neglogp"]
@@ -320,6 +368,7 @@ class IQL_Mimic:
                         q2_pred = self.qf2({"obs": batch["obs_buf"], "actions": actions,
                          "mimic_target_poses": batch["mimic_target_poses"]})
 
+                    self.actor.eval()
                     actor_out = self.actor.eval_forward(
                         {"obs":next_obs, "mimic_target_poses": next_targets}
                     )
@@ -363,24 +412,22 @@ class IQL_Mimic:
 
                     ## add CQL
                     random_actions_tensor = torch.FloatTensor(q2_pred.shape[0] * self.num_random,
-                                                              actions.shape[-1]).uniform_(-1, 1)  # .cuda()
-                    curr_actions_tensor, curr_log_pis = self._get_policy_actions(obs, num_actions=self.num_random,
-                                                                                 network=self.policy)
-                    new_curr_actions_tensor, new_log_pis = self._get_policy_actions(next_obs,
-                                                                                    num_actions=self.num_random,
-                                                                                    network=self.policy)
-                    q1_rand = self._get_tensor_values(obs, random_actions_tensor, network=self.qf1)
-                    q2_rand = self._get_tensor_values(obs, random_actions_tensor, network=self.qf2)
-                    q1_curr_actions = self._get_tensor_values(obs, curr_actions_tensor, network=self.qf1)
-                    q2_curr_actions = self._get_tensor_values(obs, curr_actions_tensor, network=self.qf2)
-                    q1_next_actions = self._get_tensor_values(obs, new_curr_actions_tensor, network=self.qf1)
-                    q2_next_actions = self._get_tensor_values(obs, new_curr_actions_tensor, network=self.qf2)
+                                                              actions.shape[-1]).uniform_(-np.pi, np.pi)  # .cuda()
+                    curr_actions_tensor, curr_log_pis = self._get_policy_actions({"obs":batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]}, num_actions=self.num_random)
+                    new_curr_actions_tensor, new_log_pis = self._get_policy_actions({"obs":next_obs, "mimic_target_poses": next_targets},
+                                                                                    num_actions=self.num_random)
+                    q1_rand = self._get_tensor_values({"obs":batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]}, random_actions_tensor, network=self.qf1)
+                    q2_rand = self._get_tensor_values({"obs":batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]}, random_actions_tensor, network=self.qf2)
+                    q1_curr_actions = self._get_tensor_values({"obs":batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]}, curr_actions_tensor, network=self.qf1)
+                    q2_curr_actions = self._get_tensor_values({"obs":batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]}, curr_actions_tensor, network=self.qf2)
+                    q1_next_actions = self._get_tensor_values({"obs":batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]}, new_curr_actions_tensor, network=self.qf1)
+                    q2_next_actions = self._get_tensor_values({"obs":batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]}, new_curr_actions_tensor, network=self.qf2)
 
                     cat_q1 = torch.cat(
-                        [q1_rand, q1_pred.unsqueeze(1), q1_next_actions, q1_curr_actions], 1
+                        [q1_rand, q1_pred.unsqueeze(1).unsqueeze(1), q1_next_actions, q1_curr_actions], 1
                     )
                     cat_q2 = torch.cat(
-                        [q2_rand, q2_pred.unsqueeze(1), q2_next_actions, q2_curr_actions], 1
+                        [q2_rand, q2_pred.unsqueeze(1).unsqueeze(1), q2_next_actions, q2_curr_actions], 1
                     )
                     std_q1 = torch.std(cat_q1, dim=1)
                     std_q2 = torch.std(cat_q2, dim=1)
@@ -421,7 +468,7 @@ class IQL_Mimic:
                     Update networks
                     """
                     # Update the Q-functions iff
-                    self._num_q_update_steps += 1
+                    #self._num_q_update_steps += 1
                     self.qf1_optimizer.zero_grad()
                     qf1_loss.backward(retain_graph=True)
                     self.qf1_optimizer.step()
@@ -431,31 +478,31 @@ class IQL_Mimic:
                         qf2_loss.backward(retain_graph=True)
                         self.qf2_optimizer.step()
 
-                    self._num_policy_update_steps += 1
-                    self.policy_optimizer.zero_grad()
+                    #self._num_policy_update_steps += 1
+                    self.actor_optimizer.zero_grad()
                     policy_loss.backward(retain_graph=False)
-                    self.policy_optimizer.step()
+                    self.actor_optimizer.step()
 
                     """
                     Soft Updates
                     """
-                    ptu.soft_update_from_to(
-                        self.qf1, self.target_qf1, self.soft_target_tau
-                    )
+                    #ptu.soft_update_from_to(
+                    #    self.qf1, self.target_qf1, self.soft_target_tau
+                    #)
                     if self.num_qs > 1:
-                        ptu.soft_update_from_to(
+                        soft_update_from_to(
                             self.qf2, self.target_qf2, self.soft_target_tau
                         )
 
 
                     q1_loss_tensor[batch_id * self.update_steps_per_stage + i] = qf1_loss.mean().detach()
                     q2_loss_tensor[batch_id * self.update_steps_per_stage + i] = qf2_loss.mean().detach()
-                    v_loss_tensor[batch_id * self.update_steps_per_stage + i] = vf_loss.mean().detach()
+                    #v_loss_tensor[batch_id * self.update_steps_per_stage + i] = vf_loss.mean().detach()
                     a_loss_tensor_adw[batch_id * self.update_steps_per_stage + i] = policy_loss.mean().detach()
                     a_loss_tensor_adw_neglog[batch_id * self.update_steps_per_stage + i] = actor_out["neglogp"].mean().detach()
 
 
-            self.log_dict.update({"ac/v_loss": v_loss_tensor.mean()})
+            #self.log_dict.update({"ac/v_loss": v_loss_tensor.mean()})
             self.log_dict.update({"ac/q1_loss": q1_loss_tensor.mean()})
             self.log_dict.update({"ac/q2_loss": q2_loss_tensor.mean()})
             self.log_dict.update({"actor_loss/neg_log": a_loss_tensor_adw_neglog.mean()})
