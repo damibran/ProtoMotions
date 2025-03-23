@@ -2,12 +2,12 @@
 
   <statistic extent="2" center="0 0 1"/>
 
-  <option timestep="0.00555"/>
+  <option timestep="0.00333"/>
 
   <default>
     <motor ctrlrange="-1 1" ctrllimited="true"/>
     <default class="body">
-      <geom type="capsule" condim="1"/> <!-- friction="1.0 0.05 0.05" solimp=".9 .99 .003" solref=".015 1" -->
+      <geom type="capsule" condim="1" friction="1.0 0.05 0.05" solimp=".9 .99 .003" solref=".015 1"/>
       <!--<joint type="hinge" damping="0.1" stiffness="5" armature=".007" limited="true" solimplimit="0 .99 .01"/>-->
       <site size=".04" group="3"/>
       <default class="force-torque">

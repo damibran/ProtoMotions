@@ -107,9 +107,11 @@ class MjcMimic(BaseInterface):
             pd_tar = self.action_to_pd_targets(actions[env_id])
 
             self.mjc_datas[env_id].ctrl = pd_tar.squeeze(0).cpu().detach().numpy()
-            mujoco.mj_step(self.mjc_models[env_id], self.mjc_datas[env_id])
 
-            self.motion_times[env_id] += self.dt
+            for i in range(10):
+                mujoco.mj_step(self.mjc_models[env_id], self.mjc_datas[env_id])
+
+            self.motion_times[env_id] += 1. / 30.
 
             self.obs_buf[env_id], self.mimic_target_poses[env_id] = self._compute_obs(env_id)
             self.rew_buf[env_id] = self._compute_reward(env_id)
