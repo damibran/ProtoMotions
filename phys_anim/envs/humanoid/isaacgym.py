@@ -25,7 +25,7 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+import math
 import os
 import os.path as osp
 
@@ -319,6 +319,8 @@ class Humanoid(BaseHumanoid, GymBaseInterface):  # type: ignore[misc]
             "default_dof_drive_mode",
         ]
         for option in asset_config_options:
+            if getattr(self.config.robot.asset, option) is not None:
+                print("non none option")
             option_value = set_value_if_not_none(
                 getattr(asset_options, option), getattr(self.config.robot.asset, option)
             )
@@ -392,6 +394,21 @@ class Humanoid(BaseHumanoid, GymBaseInterface):  # type: ignore[misc]
             else:
                 self.dof_limits_lower.append(dof_prop["lower"][j])
                 self.dof_limits_upper.append(dof_prop["upper"][j])
+
+        for j in range(self.num_dof):
+            info_str = ""
+            info_str += " name:" + str(self.dof_names[j]) + " "
+            info_str += " lower:" + str(math.degrees(dof_prop[j]["lower"])) + " "
+            info_str += " upper:" + str(math.degrees(dof_prop[j]["upper"])) + " "
+            info_str += " hasLimits:" + str(dof_prop[j]["hasLimits"]) + " "
+            info_str += " driveMode:" + str(dof_prop[j]["driveMode"]) + " "
+            info_str += " velocity:" + str(dof_prop[j]["velocity"]) + " "
+            info_str += " effort:" + str(dof_prop[j]["effort"]) + " "
+            info_str += " stiffness:" + str(dof_prop[j]["stiffness"]) + " "
+            info_str += " damping:" + str(dof_prop[j]["stiffness"]) + " "
+            info_str += " friction:" + str(dof_prop[j]["stiffness"]) + " "
+            info_str += " armature:" + str(dof_prop[j]["stiffness"]) + " "
+            print(info_str)
 
         self.dof_limits_lower = torch_utils.to_torch(
             self.dof_limits_lower, device=self.device
@@ -547,6 +564,10 @@ class Humanoid(BaseHumanoid, GymBaseInterface):  # type: ignore[misc]
                 )
             ]
         )
+
+        rb_porp = self.gym.get_actor_rigid_body_properties(
+                    env_ptr, humanoid_handle
+                )
 
         for j in range(self.num_bodies):
             self.gym.set_rigid_body_color(
