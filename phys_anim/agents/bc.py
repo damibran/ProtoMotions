@@ -114,6 +114,14 @@ class BC:
                         self.w_last,
                     )
                 }
+
+                for attr in lib_set[motion_id].keys():
+                    if attr == "Actions":
+                        # Shift tensor elements to the left and trim size
+                        lib_set[motion_id][attr] = torch.roll(lib_set[motion_id][attr], shifts=-1, dims=0)[:-1]
+                    else:
+                        # Remove the last entry for other tensors
+                        lib_set[motion_id][attr] = lib_set[motion_id][attr][:-1]
             self.demo_subsets.append(lib_set)
 
         print("Demo Dataset Creating")
