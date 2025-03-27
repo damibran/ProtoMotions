@@ -1,0 +1,9 @@
+# @package _global_
+
+defaults:
+  - /algo: ppo
+  - /env: deltaaction
+  - /opt/disable_discriminator  # Default mimic experiments don't use the discriminator
+  - /opt/mimic/early_termination_tracking_err
+
+experiment_name: deltaaction

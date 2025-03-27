@@ -67,7 +67,6 @@ from phys_anim.agents.callbacks.slurm_autoresume import (
 
 from phys_anim.agents.ppo import PPO  # noqa: E402
 
-
 @hydra.main(config_path="config", config_name="base")
 def main(config: OmegaConf):
     # resolve=False is important otherwise overrides
