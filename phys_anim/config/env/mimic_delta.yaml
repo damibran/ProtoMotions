@@ -7,29 +7,41 @@ defaults:
 env:
   _target_: phys_anim.envs.mimic.deltaaction.MimicHumanoidDelta
   config:
+    delta_checkpoint: results/deltaaction/lightning_logs/version_0/last.ckpt
     deltaaction:
-        _target_: phys_anim.agents.models.actor.ActorFixedSigma
-        _recursive_: false
-        config:
-          mu_model:
-            _target_: phys_anim.agents.models.mlp.MultiHeadedMLP
-            _recursive_: false
-            config:
-              initializer: ${algo.config.actor.config.initializer}
-              units:
-                - 1024
-                - 512
-              activation: ${algo.config.actor.config.activation}
-              normalize_obs: ${algo.config.normalize_obs}
-              obs_clamp_value: ${algo.config.obs_clamp_value}
-              use_layer_norm: ${algo.config.actor.config.use_layer_norm}
-              terrain_model: ${algo.config.models.terrain_models.mlp}
-              extra_inputs:
-                terrain: ${..terrain_model}
-          init_logstd: -2.9
-          learnable_sigma: false
-          sigma_schedule: null
-          use_layer_norm: false
-          activation: relu
-          initializer: default
-          checkpoint: results/deltaaction/lightning_logs/version_2/last.ckpt
+      _target_: phys_anim.agents.models.actor.ActorFixedSigma
+      _recursive_: false
+      config:
+        mu_model:
+          _target_: phys_anim.agents.models.mlp.MultiHeadedMLP
+          _recursive_: false
+          config:
+            initializer: ${algo.config.actor.config.initializer}
+            units:
+              - 512
+              - 512
+              - 512
+              - 512
+              - 512
+              - 512
+            activation: ${algo.config.actor.config.activation}
+            normalize_obs: ${algo.config.normalize_obs}
+            obs_clamp_value: ${algo.config.obs_clamp_value}
+            use_layer_norm: ${algo.config.actor.config.use_layer_norm}
+            terrain_model: ${algo.config.models.terrain_models.mlp}
+            extra_inputs:
+              terrain: ${..terrain_model}
+              mimic_target_poses: ${algo.config.models.mimic_target_pose_model}
+              mjc_action:
+                  _target_: phys_anim.agents.models.common.Flatten
+                  config:
+                    normalize_obs: ${algo.config.normalize_obs}
+                    obs_clamp_value: null
+                  num_in: ${robot.number_of_actions}
+                  num_out: ${.num_in}
+        init_logstd: -2.9
+        learnable_sigma: false
+        sigma_schedule: null
+        use_layer_norm: false
+        activation: relu
+        initializer: default

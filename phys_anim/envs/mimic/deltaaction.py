@@ -36,13 +36,23 @@ from hydra.utils import instantiate
 
 from phys_anim.agents.models.actor import ActorFixedSigma
 
+from pathlib import Path
 
 class MimicHumanoidDelta(MimicHumanoid):  # type: ignore[misc]
     def __init__(self, config, device: torch.device):
         super().__init__(config, device)
         self.delta_action: ActorFixedSigma = instantiate(
-            self.config.actor, num_in=self.num_obs, num_act=self.num_act
+            self.config.deltaaction, num_in=self.num_obs, num_act=self.num_act
         )
+        self.delta_action.to(self.device)
+        self.delta_action.eval()
+
+        checkpoint = Path(self.config.delta_checkpoint).resolve()
+        print(f"Loading delta from checkpoint: {checkpoint}")
+        state_dict = torch.load(checkpoint, map_location=self.device)
+
+        self.delta_action.load_state_dict(state_dict['actor'])
+
         self.orig_action = torch.zeros_like(self.initial_dof_pos, device=self.device, dtype=torch.float32)
 
     def pre_physics_step(self, actions):
@@ -50,10 +60,12 @@ class MimicHumanoidDelta(MimicHumanoid):  # type: ignore[misc]
 
         self.orig_action = actions
 
-        delta = self.delta_action({'obs': None, 'mimic_target_poses':None, })
+        delta = self.delta_action.eval_forward({'obs': self.obs_buf,
+                                   'mimic_target_poses': self.mimic_target_poses,
+                                   'mjc_action': actions})['mus']
 
-        self.actions = actions + mjc_action
+        self.actions = actions + delta
 
     def post_physics_step(self):
         super().post_physics_step()
-        self.actions = self.delta_action
+        self.actions = self.orig_action
