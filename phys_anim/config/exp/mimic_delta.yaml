@@ -2,10 +2,14 @@
 
 defaults:
   - /algo: mimic
-  - /env: deltaaction
+  - /env: mimic_delta
   - /opt/disable_discriminator  # Default mimic experiments don't use the discriminator
-  - /opt/mimic/mlp/target_pose_mjc_action_obs
+  - /opt/mimic/mlp/target_pose_obs
   - /opt/mimic/global_tracking
   - /opt/mimic/early_termination_tracking_err
 
-experiment_name: deltaaction
+#env:
+#  config:
+#    action_as_dof: True
+
+experiment_name: mimic_delta

@@ -1,0 +1,53 @@
+# @package _global_
+
+algo:
+  config:
+    models:
+      mimic_target_pose_model:
+        _target_: phys_anim.agents.models.common.Flatten
+        config:
+          normalize_obs: ${algo.config.normalize_obs}
+          obs_clamp_value: ${algo.config.obs_clamp_value}
+        num_in: ${eval:${env.config.mimic_target_pose.num_future_steps}*${env.config.mimic_target_pose.num_obs_per_target_pose}}
+        num_out: ${.num_in}
+      mimic_mjc_action_model:
+        _target_: phys_anim.agents.models.common.Flatten
+        config:
+          normalize_obs: ${algo.config.normalize_obs}
+          obs_clamp_value: null
+        num_in: ${robot.number_of_actions}
+        num_out: ${.num_in}
+
+    actor:
+      config:
+        mu_model:
+          config:
+            units: [512, 512, 512, 512, 512, 512]
+            extra_inputs:
+              mimic_target_poses: ${algo.config.models.mimic_target_pose_model}
+              mjc_action: ${algo.config.models.mimic_mjc_action_model}
+
+    critic:
+      config:
+        units: [1024, 1024, 1024]
+        extra_inputs:
+          mimic_target_poses: ${algo.config.models.mimic_target_pose_model}
+
+    extra_inputs:
+      mimic_target_poses:
+        retrieve_from_env: True
+        dtype: float
+        size: ${algo.config.models.mimic_target_pose_model.num_in}
+      mjc_action:
+        retrieve_from_env: True
+        dtype: float
+        size: ${robot.number_of_actions}
+
+env:
+  config:
+    max_episode_length: 10000 # original 300
+
+    mimic_target_pose:
+      enabled: True
+      type: max-coords-future-rel
+      num_future_steps: 5
