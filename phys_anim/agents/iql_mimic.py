@@ -22,6 +22,8 @@ from phys_anim.envs.humanoid.humanoid_utils import build_disc_observations, buil
     compute_humanoid_observations_max
 import math
 import numpy as np
+import h5py
+
 
 
 # def list_roll(inlist, n):
@@ -76,44 +78,21 @@ class IQL_Mimic:
             dtype=torch.long,
         )
 
-        self.subsets = []
+        self.dataset_file = h5py.File(self.all_config.algo.config.dataset_file, "r")
 
-        for _dir in self.all_config.algo.config.dataset_dirs:
-            subset = {}
-            for attr in self.all_config.algo.config.attribs_to_import:
-                file_path = os.path.join(_dir, self.all_config.motion_name+'_'+attr+'.npy')
-                loaded = torch.from_numpy(np.load(file_path)).to(self.device)
-                subset[attr] = loaded
+        self.dataset = {}
 
-            for attr in subset.keys():
-                if attr == "actions" or attr == "rew_buf":
-                    # Shift tensor elements to the left and trim size
-                    subset[attr] = torch.roll(subset[attr], shifts=-1, dims=0)[:-1]
-                else:
-                    # Remove the last entry for other tensors
-                    subset[attr] = subset[attr][:-1]
-
-            # Zero out rew_buf elements where reset_buf is 1
-            reset_buf_inverted = 1 - subset["reset_buf"]  # Invert reset_buf (0 becomes 1, 1 becomes 0)
-            subset["rew_buf"] = subset["rew_buf"] * reset_buf_inverted  # Zero out where reset_buf is 1
-
-            self.subsets.append(subset)
-
-        print("Dataset Creating")
-        self.dataset={}
-        for attr in self.all_config.algo.config.attribs_to_import:
-            self.dataset[attr] = self.subsets[0][attr]
-
-        self.dataset_len = self.dataset["obs_buf"].shape[0]
+        self.dataset_len = self.dataset_file["obs"].shape[0]
 
         self.update_steps_per_stage = 1
 
         pass
 
     def fill_dataset(self):
-        subset_ind = random.randint(0, len(self.subsets) - 1)
+        num_envs = self.dataset_file['obs'].shape[1]
+        env_ind = random.randint(0, num_envs - 1)
         for attr in self.all_config.algo.config.attribs_to_import:
-            self.dataset[attr] = self.subsets[subset_ind][attr]
+            self.dataset[attr] = torch.from_numpy(self.dataset_file[attr][:,env_ind]).to(self.device)
 
 
     def dataset_roll(self):
@@ -181,7 +160,7 @@ class IQL_Mimic:
         self.target_update_period = 1
         self.soft_target_tau = 0.005
 
-        state_dict = torch.load(Path.cwd() / "results/iql_mimic/lightning_logs/version_1/last.ckpt", map_location=self.device)
+        state_dict = torch.load(Path.cwd() / "results/iql_mimic/lightning_logs/version_2/last.ckpt", map_location=self.device)
         self.actor.load_state_dict(state_dict["actor"])
         self.save(name="last_a.ckpt")
 
@@ -206,28 +185,28 @@ class IQL_Mimic:
                     self.dataset_roll()
 
                     batch = {
-                        "obs_buf": self.dataset["obs_buf"][0:self.config.batch_size],
+                        "obs": self.dataset["obs"][0:self.config.batch_size],
                         "mimic_target_poses": self.dataset["mimic_target_poses"][0:self.config.batch_size],
-                        "reset_buf": self.dataset["reset_buf"][0:self.config.batch_size],
+                        "dones": self.dataset["dones"][0:self.config.batch_size],
                         "actions": self.dataset["actions"][0:self.config.batch_size],
-                        "rewards": self.dataset["rew_buf"][0:self.config.batch_size],
+                        "rewards": self.dataset["rewards"][0:self.config.batch_size],
                     }
 
                     rewards = batch["rewards"]
 
-                    next_obs = torch.roll(batch["obs_buf"], shifts=-1, dims=0)
+                    next_obs = torch.roll(batch["obs"], shifts=-1, dims=0)
                     next_targets = torch.roll(batch["mimic_target_poses"], shifts=-1, dims=0)
 
                     """
                     QF Loss
                     """
-                    q1_pred = self.qf1({"obs": batch["obs_buf"], "actions": batch["actions"],
+                    q1_pred = self.qf1({"obs": batch["obs"], "actions": batch["actions"],
                          "mimic_target_poses": batch["mimic_target_poses"]})
-                    q2_pred = self.qf2({"obs": batch["obs_buf"], "actions": batch["actions"],
+                    q2_pred = self.qf2({"obs": batch["obs"], "actions": batch["actions"],
                          "mimic_target_poses": batch["mimic_target_poses"]})
                     target_vf_pred = self.vf({"obs": next_obs, "mimic_target_poses": next_targets}).detach()
 
-                    q_target = rewards + (1. - batch['reset_buf']) * self.discount * target_vf_pred
+                    q_target = rewards + (1. - batch['dones']) * self.discount * target_vf_pred
                     q_target = q_target.detach()
                     qf1_loss = self.qf_criterion(q1_pred, q_target)
                     qf2_loss = self.qf_criterion(q2_pred, q_target)
@@ -236,12 +215,12 @@ class IQL_Mimic:
                     VF Loss
                     """
                     q_pred = torch.min(
-                        self.target_qf1({"obs": batch["obs_buf"], "actions": batch["actions"],
+                        self.target_qf1({"obs": batch["obs"], "actions": batch["actions"],
                          "mimic_target_poses": batch["mimic_target_poses"]}),
-                        self.target_qf2({"obs": batch["obs_buf"], "actions": batch["actions"],
+                        self.target_qf2({"obs": batch["obs"], "actions": batch["actions"],
                          "mimic_target_poses": batch["mimic_target_poses"]}),
                     ).detach()
-                    vf_pred = self.vf({"obs": batch["obs_buf"], "mimic_target_poses": batch["mimic_target_poses"]})
+                    vf_pred = self.vf({"obs": batch["obs"], "mimic_target_poses": batch["mimic_target_poses"]})
                     vf_err = vf_pred - q_pred
                     vf_sign = (vf_err > 0).float()
                     vf_weight = (1 - vf_sign) * self.expectile + vf_sign * (1 - self.expectile)
@@ -252,7 +231,7 @@ class IQL_Mimic:
                     """
                     self.actor.training = True
                     actor_out = self.actor.training_forward(
-                        {"obs": batch["obs_buf"],
+                        {"obs": batch["obs"],
                          "actions": batch["actions"],
                          "mimic_target_poses": batch["mimic_target_poses"]})
 
