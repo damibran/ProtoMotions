@@ -1,6 +1,6 @@
 # @package _global_
 
-motion_name: RL_Avatar_Idle_Ready_Motion
+motion_name: RL_Avatar_Atk_2xCombo01_Motion
 
 algo:
   config:
@@ -9,15 +9,15 @@ algo:
       - output/recordings/mimic/000/
       - output/recordings/mimic/001/
       - output/recordings/mimic/002/
-      - output/recordings/mimic/003/
-      - output/recordings/mimic/004/
-      - output/recordings/mimic/005/
-      - output/recordings/mimic/006/
-      - output/recordings/mimic/007/
-      - output/recordings/mimic/008/
-      - output/recordings/mimic/009/
-      - output/recordings/mimic/010/
-      - output/recordings/mimic/011/
+    #  - output/recordings/mimic/003/
+    #  - output/recordings/mimic/004/
+    #  - output/recordings/mimic/005/
+    #  - output/recordings/mimic/006/
+    #  - output/recordings/mimic/007/
+    #  - output/recordings/mimic/008/
+    #  - output/recordings/mimic/009/
+    #  - output/recordings/mimic/010/
+    #  - output/recordings/mimic/011/
 
     attribs_to_import:
       - obs_buf
@@ -131,7 +131,7 @@ algo:
     expectile: 0.7
     alpha: 0.005
     batch_size: 256
-    max_epochs: 48000
+    max_epochs: 10000
     normalize_obs: True
     obs_clamp_value: null
     discriminator_reward_w: 2.0

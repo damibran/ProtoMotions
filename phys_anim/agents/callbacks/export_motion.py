@@ -40,6 +40,7 @@ import numpy as np
 import yaml
 import pickle
 from scipy.spatial.transform import Rotation as sRot
+import h5py
 
 
 class ExportMotion(RL_EvalCallback):
@@ -50,18 +51,44 @@ class ExportMotion(RL_EvalCallback):
         super().__init__(config, training_loop)
         self.record_dir = Path(config.record_dir)
         self.record_dir.mkdir(exist_ok=True, parents=True)
+        self.num_rec_steps = 0
+        self.num_steps = training_loop.num_steps
+        self.file = h5py.File(self.record_dir / 'dataset.hdf5', 'w')
+        self.num_envs = 0
 
     def on_pre_evaluate_policy(self):
         # Doing this in two lines because of type annotation issues.
         env: BaseHumanoid = self.training_loop.env
         self.env = env
+        self.num_envs = self.env.config.env_num_to_export
+        length = self.training_loop.num_steps * self.training_loop.config.max_epochs
+        self.file.create_dataset('obs',(length, self.num_envs,self.env.num_obs))
+        self.file.create_dataset('mimic_target_poses',(length, self.num_envs, self.env.config.mimic_target_pose.num_obs_per_target_pose
+                                                 * self.env.config.mimic_target_pose.num_future_steps))
+        self.file.create_dataset('actions', (length, self.num_envs, self.env.num_act))
+        self.file.create_dataset('rewards', (length, self.num_envs))
+        self.file.create_dataset('dones', (length, self.num_envs))
 
     def on_pre_eval_env_step(self, actor_state):
         actor_state["actions"] = actor_state["mus"]
         return actor_state
 
+    def on_post_train_play_steps(self, actor_state):
+        start = self.num_rec_steps
+        end = self.num_rec_steps + self.num_steps
+
+        self.file['obs'][start:end] = actor_state["obs"][0: self.num_envs].cpu().numpy()
+        self.file['mimic_target_poses'][start:end] = actor_state["mimic_target_poses"][0: self.num_envs].cpu().numpy()
+        self.file['actions'][start:end] = actor_state["actions"][0: self.num_envs].cpu().numpy()
+        self.file['rewards'][start:end] = actor_state["rewards"][0: self.num_envs].cpu().numpy()
+        self.file['dones'][start:end] = actor_state["dones"][0: self.num_envs].cpu().numpy()
+
+        self.num_rec_steps += self.num_steps
+
     def on_post_evaluate_policy(self):
-        self.write_recordings()
+        #self.write_recordings()
+        self.file.close()
+        pass
 
     def write_recordings(self):
         fps = np.round(1.0 / self.env.dt)

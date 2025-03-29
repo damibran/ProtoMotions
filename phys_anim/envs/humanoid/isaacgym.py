@@ -1592,18 +1592,18 @@ class Humanoid(BaseHumanoid, GymBaseInterface):  # type: ignore[misc]
         body_rotation[negative_w_mask] = -body_rotation[negative_w_mask]
 
         # Prepare motion data dictionary
-        current_motion_data = {
-            "root_pos": root_position.cpu(),
-            "global_rot": body_rotation.cpu(),
-            "rigid_body_rot": self.rigid_body_rot[0:env_num_to_export].clone().cpu(),
-            "rigid_body_pos": self.rigid_body_pos[0:env_num_to_export].clone().cpu(),
-        }
+        #current_motion_data = {
+        #    "root_pos": root_position.cpu(),
+        #    "global_rot": body_rotation.cpu(),
+        #    "rigid_body_rot": self.rigid_body_rot[0:env_num_to_export].clone().cpu(),
+        #    "rigid_body_pos": self.rigid_body_pos[0:env_num_to_export].clone().cpu(),
+        #}
 
         # Store motion data
-        for data_key, data_value in current_motion_data.items():
-            if data_key not in self.motion_recording:
-                self.motion_recording[data_key] = []
-            self.motion_recording[data_key].append(data_value)
+        #for data_key, data_value in current_motion_data.items():
+        #    if data_key not in self.motion_recording:
+        #        self.motion_recording[data_key] = []
+        #    self.motion_recording[data_key].append(data_value)
 
     def apply_sideways_force_to_feet(self):
         """

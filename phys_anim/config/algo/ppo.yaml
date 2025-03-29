@@ -75,7 +75,7 @@ algo:
     val_clamp_value: null
     normalize_advantage: True
     normalize_obs: True
-    batch_size: 16384
+    batch_size: 512
     task_reward_w: 1.0
     num_mini_epochs: 6
     gradient_accumulation_steps: 1
@@ -87,7 +87,7 @@ algo:
     manual_save_every: 10
     use_rand_action_masks: False
     obs_clamp_value: null
-    max_epochs: 700 #${eval:${training_max_steps}//${ngpu}//${num_envs}//${.num_steps}}
+    max_epochs: 7000 #${eval:${training_max_steps}//${ngpu}//${num_envs}//${.num_steps}}
 
     eval_callbacks: null
 

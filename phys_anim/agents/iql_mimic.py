@@ -181,9 +181,9 @@ class IQL_Mimic:
         self.target_update_period = 1
         self.soft_target_tau = 0.005
 
-        # state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_0/last.ckpt", map_location=self.device)
-        # self.actor.load_state_dict(state_dict["actor"])
-        # self.save(name="last_a.ckpt")
+        state_dict = torch.load(Path.cwd() / "results/iql_mimic/lightning_logs/version_1/last.ckpt", map_location=self.device)
+        self.actor.load_state_dict(state_dict["actor"])
+        self.save(name="last_a.ckpt")
 
     def fit(self):
 
