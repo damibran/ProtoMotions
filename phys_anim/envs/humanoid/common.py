@@ -200,7 +200,7 @@ class BaseHumanoid(Humanoid):
                 xy_position = self.terrain.sample_valid_locations(len(env_ids))
 
         #todo: temp
-        xy_position = torch.zeros_like(xy_position)
+        #xy_position = torch.zeros_like(xy_position)
 
         if scene_ids is not None:
             if -2 in scene_ids:
@@ -625,10 +625,10 @@ class BaseHumanoid(Humanoid):
 
         root_offset = ref_state.root_pos[:, :2].clone()
 
-        #ref_state.root_pos[:, :2] = 0
-        #ref_state.root_pos[:, :3] += self.get_envs_respawn_position(
-        #    env_ids, rb_pos=ref_state.rb_pos, offset=root_offset, scene_ids=scene_ids
-        #)
+        ref_state.root_pos[:, :2] = 0
+        ref_state.root_pos[:, :3] += self.get_envs_respawn_position(
+            env_ids, rb_pos=ref_state.rb_pos, offset=root_offset, scene_ids=scene_ids
+        )
 
         ref_state.root_pos[:,2] += 0.2
 

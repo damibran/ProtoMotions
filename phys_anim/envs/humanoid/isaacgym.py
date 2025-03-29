@@ -269,10 +269,10 @@ class Humanoid(BaseHumanoid, GymBaseInterface):  # type: ignore[misc]
         tm_params = gymapi.TriangleMeshParams()
         tm_params.nb_vertices = self.terrain.vertices.shape[0]
         tm_params.nb_triangles = self.terrain.triangles.shape[0]
-        tm_params.transform.p.x = -50.0
-        tm_params.transform.p.y = -50.0
-        #tm_params.transform.p.x = 0.
-        #tm_params.transform.p.y = 0.
+        #tm_params.transform.p.x = -50.0
+        #tm_params.transform.p.y = -50.0
+        tm_params.transform.p.x = 0.
+        tm_params.transform.p.y = 0.
         tm_params.transform.p.z = 0.0
         tm_params.static_friction = self.config.simulator.plane.static_friction
         tm_params.dynamic_friction = self.config.simulator.plane.dynamic_friction

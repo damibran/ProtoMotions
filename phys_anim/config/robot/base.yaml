@@ -41,7 +41,7 @@ robot:
     action_scale: 1.0
     # Used with isaac pd controller
     isaac_pd_scale: False  # This is needed for the SMPL model due to weight variations
-    clamp_actions: 1.0
+    clamp_actions: null #todo original 1.0
 
   asset:
     collapse_fixed_joints: null
