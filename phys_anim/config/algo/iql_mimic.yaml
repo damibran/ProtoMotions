@@ -116,7 +116,7 @@ algo:
       latent_steps_max: 150
 
     #IQL parameters
-    expectile: 0.7
+    expectile: 0.9
     alpha: 0.005
     batch_size: 16384
     max_epochs: 10000
