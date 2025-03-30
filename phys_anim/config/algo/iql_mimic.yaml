@@ -5,7 +5,7 @@ motion_name: RL_Avatar_Atk_2xCombo01_Motion
 algo:
   config:
 
-    dataset_file: output/recordings/mimic_combo/dataset.hdf5
+    dataset_file: output/recordings/mimic_combo_eval/dataset.hdf5
 
     attribs_to_import:
       - obs
@@ -116,8 +116,8 @@ algo:
       latent_steps_max: 150
 
     #IQL parameters
-    expectile: 0.9
-    alpha: 0.005
+    expectile: 0.8
+    alpha: 0.5
     batch_size: 16384
     max_epochs: 10000
     normalize_obs: True

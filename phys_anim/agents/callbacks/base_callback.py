@@ -39,7 +39,10 @@ class RL_EvalCallback(DeviceDtypeModuleMixin):
     def on_pre_evaluate_policy(self):
         pass
 
-    def on_post_train_play_steps(self, actor_state):
+    def on_pre_train_env_step(self, actor_state):
+        pass
+
+    def on_post_train_env_step(self, actor_state):
         pass
 
     def on_pre_eval_env_step(self, actor_state):

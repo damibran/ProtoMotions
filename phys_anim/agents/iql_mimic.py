@@ -141,11 +141,13 @@ class IQL_Mimic:
         target_qf1: NormObsBase = instantiate(
             self.config.critic_sa, num_in=self.num_obs, num_out=1
         )
+        target_qf1.load_state_dict(self.qf1.state_dict())
         self.target_qf1 = self.fabric.setup(target_qf1)
 
         target_qf2: NormObsBase = instantiate(
             self.config.critic_sa, num_in=self.num_obs, num_out=1
         )
+        target_qf2.load_state_dict(self.qf2.state_dict())
         self.target_qf2 = self.fabric.setup(target_qf2)
 
         vf: NormObsBase = instantiate(

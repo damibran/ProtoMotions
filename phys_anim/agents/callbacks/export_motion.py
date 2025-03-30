@@ -51,7 +51,7 @@ class ExportMotion(RL_EvalCallback):
         super().__init__(config, training_loop)
         self.record_dir = Path(config.record_dir)
         self.record_dir.mkdir(exist_ok=True, parents=True)
-        self.num_rec_steps = 0
+        self.ind_rec_steps = 0
         self.num_steps = training_loop.num_steps
         self.file = h5py.File(self.record_dir / 'dataset.hdf5', 'w')
         self.num_envs = 0
@@ -62,31 +62,46 @@ class ExportMotion(RL_EvalCallback):
         self.env = env
         self.num_envs = self.env.config.env_num_to_export
         length = self.training_loop.num_steps * self.training_loop.config.max_epochs
-        self.file.create_dataset('obs',(length, self.num_envs,self.env.num_obs))
+        self.file.create_dataset('obs',(length, self.num_envs,self.env.num_obs), chunks=True)
         self.file.create_dataset('mimic_target_poses',(length, self.num_envs, self.env.config.mimic_target_pose.num_obs_per_target_pose
-                                                 * self.env.config.mimic_target_pose.num_future_steps))
-        self.file.create_dataset('actions', (length, self.num_envs, self.env.num_act))
-        self.file.create_dataset('rewards', (length, self.num_envs))
-        self.file.create_dataset('dones', (length, self.num_envs))
+                                                 * self.env.config.mimic_target_pose.num_future_steps), chunks=True)
+        self.file.create_dataset('actions', (length, self.num_envs, self.env.num_act), chunks=True)
+        self.file.create_dataset('rewards', (length, self.num_envs), chunks=True)
+        self.file.create_dataset('dones', (length, self.num_envs), chunks=True)
+
+    def on_pre_train_env_step(self, actor_state):
+        self.on_pre_env_step(actor_state)
+
+    def on_post_train_env_step(self, actor_state):
+        self.on_post_env_step(actor_state)
 
     def on_pre_eval_env_step(self, actor_state):
         actor_state["actions"] = actor_state["mus"]
+        self.on_pre_env_step(actor_state)
         return actor_state
 
-    def on_post_train_play_steps(self, actor_state):
-        start = self.num_rec_steps
-        end = self.num_rec_steps + self.num_steps
+    def on_post_eval_env_step(self, actor_state):
+        self.on_post_env_step(actor_state)
+        return actor_state
 
-        self.file['obs'][start:end] = actor_state["obs"][0: self.num_envs].cpu().numpy()
-        self.file['mimic_target_poses'][start:end] = actor_state["mimic_target_poses"][0: self.num_envs].cpu().numpy()
-        self.file['actions'][start:end] = actor_state["actions"][0: self.num_envs].cpu().numpy()
-        self.file['rewards'][start:end] = actor_state["rewards"][0: self.num_envs].cpu().numpy()
-        self.file['dones'][start:end] = actor_state["dones"][0: self.num_envs].cpu().numpy()
+    def on_pre_env_step(self, actor_state):
+        self.file['obs'][self.ind_rec_steps] = actor_state["obs"][0: self.num_envs].cpu().numpy()
+        self.file['mimic_target_poses'][self.ind_rec_steps] = actor_state["mimic_target_poses"][0: self.num_envs].cpu().numpy()
+        self.file['actions'][self.ind_rec_steps] = actor_state["actions"][0: self.num_envs].cpu().numpy()
 
-        self.num_rec_steps += self.num_steps
+    def on_post_env_step(self,actor_state):
+        self.file['rewards'][self.ind_rec_steps] = actor_state["rewards"][0: self.num_envs].cpu().numpy()
+        self.file['dones'][self.ind_rec_steps] = actor_state["dones"][0: self.num_envs].cpu().numpy()
+
+        self.ind_rec_steps += 1
 
     def on_post_evaluate_policy(self):
         #self.write_recordings()
+        self.file['obs'].resize(self.ind_rec_steps + 1,axis=0)
+        self.file['mimic_target_poses'].resize(self.ind_rec_steps + 1,axis=0)
+        self.file['actions'].resize(self.ind_rec_steps + 1,axis=0)
+        self.file['rewards'].resize(self.ind_rec_steps + 1,axis=0)
+        self.file['dones'].resize(self.ind_rec_steps + 1,axis=0)
         self.file.close()
         pass
 

@@ -482,6 +482,9 @@ class PPO:
             "values", actor_state["step"], values.view(-1)
         )
 
+        for c in self.eval_callbacks:
+            c.on_pre_train_env_step(actor_state)
+
         return actor_state
 
     def pre_eval_env_step(self, actor_state: dict):
@@ -518,6 +521,9 @@ class PPO:
 
         self.episode_env_tensors.add(actor_state["extras"]["to_log"])
 
+        for c in self.eval_callbacks:
+            c.on_post_train_env_step(actor_state)
+
         return actor_state
 
     def post_eval_env_step(self, actor_state):
@@ -544,9 +550,6 @@ class PPO:
 
     def post_play_steps(self, actor_state):
         self.step_count += self.get_step_count_increment()
-
-        for c in self.eval_callbacks:
-            c.on_post_train_play_steps(actor_state)
 
         rewards = self.experience_buffer.rewards
         self.last_scaled_task_rewards_mean = rewards.detach().mean()
