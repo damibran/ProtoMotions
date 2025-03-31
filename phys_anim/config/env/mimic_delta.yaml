@@ -7,7 +7,7 @@ defaults:
 env:
   _target_: phys_anim.envs.mimic.deltaaction.MimicHumanoidDelta
   config:
-    delta_checkpoint: results/deltaaction/lightning_logs/version_0/last.ckpt
+    delta_checkpoint: results/deltaaction/lightning_logs/with_obs_action/last.ckpt
     deltaaction:
       _target_: phys_anim.agents.models.actor.ActorFixedSigma
       _recursive_: false
@@ -31,7 +31,6 @@ env:
             terrain_model: ${algo.config.models.terrain_models.mlp}
             extra_inputs:
               terrain: ${..terrain_model}
-              mimic_target_poses: ${algo.config.models.mimic_target_pose_model}
               mjc_action:
                   _target_: phys_anim.agents.models.common.Flatten
                   config:

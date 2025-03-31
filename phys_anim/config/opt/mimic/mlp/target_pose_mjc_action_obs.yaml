@@ -24,7 +24,6 @@ algo:
           config:
             units: [512, 512, 512, 512, 512, 512]
             extra_inputs:
-              mimic_target_poses: ${algo.config.models.mimic_target_pose_model}
               mjc_action: ${algo.config.models.mimic_mjc_action_model}
 
     critic:
