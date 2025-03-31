@@ -93,12 +93,6 @@ class IQL_Mimic:
         env_ind = random.randint(0, num_envs - 1)
         for attr in self.all_config.algo.config.attribs_to_import:
             self.dataset[attr] = torch.from_numpy(self.dataset_file[attr][:,env_ind]).to(self.device)
-            if attr == "rewards":
-                # Shift tensor elements to the left and trim size
-                self.dataset[attr] = torch.roll(self.dataset[attr], shifts=-1, dims=0)[:-1]
-            else:
-                # Remove the last entry for other tensors
-                self.dataset[attr] = self.dataset[attr][:-1]
 
 
     def dataset_roll(self):
@@ -168,9 +162,9 @@ class IQL_Mimic:
         self.target_update_period = 1
         self.soft_target_tau = 0.005
 
-        state_dict = torch.load(Path.cwd() / "results/iql_mimic/lightning_logs/version_2/last.ckpt", map_location=self.device)
-        self.actor.load_state_dict(state_dict["actor"])
-        self.save(name="last_a.ckpt")
+        #state_dict = torch.load(Path.cwd() / "results/iql_mimic/lightning_logs/version_2/last.ckpt", map_location=self.device)
+        #self.actor.load_state_dict(state_dict["actor"])
+        #self.save(name="last_a.ckpt")
 
     def fit(self):
 

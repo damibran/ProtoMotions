@@ -1,0 +1,12 @@
+min_delta: 0.002
+motions_root: /home/damibran/dev/repos/ProtoMotionsFork/phys_anim/data/motions/sword_shield
+motions_to_train:
+- RL_Avatar_RunBackward_Motion
+- RL_Avatar_RunLeft_Motion
+- RL_Avatar_RunRight_Motion
+one_model_max_train_time_minutes: 180
+patience: 50
+python_path: /home/damibran/anaconda3/envs/ProtoMotionsEnv/bin/python
+results_dir: /home/damibran/dev/repos/ProtoMotionsFork/results/full_body_tracker/lightning_logs/
+train_script: /home/damibran/dev/repos/ProtoMotionsFork/phys_anim/train_agent.py
+version_0_results_dir: /home/damibran/dev/repos/ProtoMotionsFork/results/full_body_tracker/lightning_logs/version_0
