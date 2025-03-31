@@ -1,9 +1,12 @@
 min_delta: 0.002
 motions_root: /home/damibran/dev/repos/ProtoMotionsFork/phys_anim/data/motions/sword_shield
 motions_to_train:
-- RL_Avatar_RunBackward_Motion
 - RL_Avatar_RunLeft_Motion
 - RL_Avatar_RunRight_Motion
+- RL_Avatar_TurnLeft180_Motion
+- RL_Avatar_TurnLeft90_Motion
+- RL_Avatar_TurnRight180_Motion
+- RL_Avatar_TurnRight90_Motion
 one_model_max_train_time_minutes: 180
 patience: 50
 python_path: /home/damibran/anaconda3/envs/ProtoMotionsEnv/bin/python

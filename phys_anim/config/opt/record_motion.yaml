@@ -6,7 +6,7 @@ algo:
       export_motion_cb:
         _target_: phys_anim.agents.callbacks.export_motion.ExportMotion
         config:
-          record_dir: output/recordings/mimic
+          record_dir: output/recordings/mimic_train
           store_poselib: False
           index_offset: ${env.config.motion_index_offset}
 

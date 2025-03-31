@@ -3,8 +3,11 @@ import random
 from pathlib import Path
 from typing import List, Tuple, Dict
 import torch
+from sympy.physics.units import length
 from torch import nn as nn
 from torch import Tensor
+from torch.ao.nn.quantized.functional import clamp
+
 from isaac_utils import torch_utils
 from lightning.fabric import Fabric
 from utils.StateActionLib import StateActionLib, MotionStateAction
@@ -16,7 +19,54 @@ from phys_anim.agents.models.infomax import JointDiscWithMutualInformationEncMLP
 from phys_anim.envs.humanoid.humanoid_utils import build_disc_action_observations, compute_humanoid_observations_max
 import math
 import numpy as np
+import h5py
+from poselib.skeleton.skeleton3d import SkeletonMotion, SkeletonState
+from utils.motion_lib import MotionLib
+from isaac_utils import rotations, torch_utils
 
+
+# jp hack
+# get rid of this ASAP, need a proper way of projecting from max coords to reduced coords
+def _local_rotation_to_dof(dof_body_ids,dof_offsets,num_dof, device, local_rot, joint_3d_format):
+    body_ids = dof_body_ids
+    dof_offsets = dof_offsets
+
+    n = local_rot.shape[0]
+    dof_pos = torch.zeros((n, num_dof), dtype=torch.float, device=device)
+
+    for j in range(len(body_ids)):
+        body_id = body_ids[j]
+        joint_offset = dof_offsets[j]
+        joint_size = dof_offsets[j + 1] - joint_offset
+
+        if joint_size == 3:
+            joint_q = local_rot[:, body_id]
+            if joint_3d_format == "exp_map":
+                formatted_joint = torch_utils.quat_to_exp_map(joint_q, w_last=True)
+            elif joint_3d_format == "xyz":
+                x, y, z = rotations.get_euler_xyz(joint_q, w_last=True)
+                formatted_joint = torch.stack([x, y, z], dim=-1)
+            else:
+                raise ValueError(f"Unknown 3d format '{joint_3d_format}'")
+
+            dof_pos[:, joint_offset: (joint_offset + joint_size)] = formatted_joint
+        elif joint_size == 1:
+            joint_q = local_rot[:, body_id]
+            joint_theta, joint_axis = torch_utils.quat_to_angle_axis(
+                joint_q, w_last=True
+            )
+            joint_theta = (
+                    joint_theta * joint_axis[..., 1]
+            )  # assume joint is always along y axis
+
+            joint_theta = rotations.normalize_angle(joint_theta)
+            dof_pos[:, joint_offset] = joint_theta
+
+        else:
+            print("Unsupported joint type")
+            assert False
+
+    return dof_pos
 
 # def list_roll(inlist, n):
 #    for i in range(n):
@@ -49,13 +99,6 @@ class IQL:
         self.expectile = self.config.expectile
         self.alpha = self.config.alpha
 
-        self.latent_reset_steps = StepTracker(
-            1,
-            min_steps=self.config.infomax_parameters.latent_steps_min,
-            max_steps=self.config.infomax_parameters.latent_steps_max,
-            device=self.device,
-        )
-
         self.setup_character_props()
 
         self.key_body_ids = torch.tensor(
@@ -66,205 +109,105 @@ class IQL:
             dtype=torch.long,
         )
 
-        print("Demo Dataset Processing START")
-        motion_libs = []
-        for m_file in self.config.motion_files:
-            motion_libs.append(StateActionLib(
-                motion_file=m_file,
-                dof_body_ids=self.dof_body_ids,
-                dof_offsets=self.dof_offsets,
-                key_body_ids=self.key_body_ids,
-                device=self.device,
-            ))
+        self.demo_dataset_files = []
+        for path in self.all_config.algo.config.motion_files:
+            self.demo_dataset_files.append(h5py.File(path, "r"))
 
-        print("Demo Dataset Libs Loaded")
-        self.demo_subsets = []
-        state = None
-        for lib in motion_libs:
-            print(lib)
-            lib_set = {}
-            for motion_id in range(len(lib.state.motions)):
-                motion_len = lib.get_motion_length(motion_id)
-                dt = lib.get_motion(motion_id).time_delta
+        self.dataset_files = []
+        for path in self.all_config.algo.config.dataset_files:
+            self.dataset_files.append(h5py.File(self.all_config.algo.config.dataset_file, "r"))
 
-                motion_times = torch.arange(0, motion_len, dt, device=self.device)
-                state = lib.get_motion_state(motion_id, motion_times)
+        self.dataset_len = self.dataset_files[0]["dones"].shape[0]
 
-                lib_set[motion_id] = {
-                    "root_pos": state.root_pos,
-                    "root_rot": state.root_rot,
-                    "root_vel": state.root_vel,
-                    "root_ang_vel": state.root_ang_vel,
-                    "dof_pos": state.dof_pos,
-                    "dof_vel": state.dof_vel,
-                    "key_body_pos": state.key_body_pos,
-                    "Actions": state.action,
-                    "DiscrimObs": build_disc_action_observations(
-                        state.root_pos,
-                        state.root_rot,
-                        state.root_vel,
-                        state.root_ang_vel,
-                        state.dof_pos,
-                        state.dof_vel,
-                        state.key_body_pos,
-                        torch.zeros(1, device=self.device),
-                        state.action,
-                        self.all_config.env.config.humanoid_obs.local_root_obs,
-                        self.all_config.env.config.humanoid_obs.root_height_obs,
-                        self.all_config.robot.dof_obs_size,
-                        self.dof_offsets,
-                        False,
-                        self.w_last,
-                    ),
-                    "HumanoidObservations": compute_humanoid_observations_max(
-                        state.rb_pos,
-                        state.rb_rot,
-                        state.rb_vel,
-                        state.rb_ang_vel,
-                        torch.zeros(1, device=self.device),
-                        self.all_config.env.config.humanoid_obs.local_root_obs,
-                        self.all_config.env.config.humanoid_obs.root_height_obs,
-                        self.w_last,
-                    )
-                }
-            self.demo_subsets.append(lib_set)
+        temp_ml = MotionLib(
+            motion_file= 'phys_anim/data/motions/sword_shield/RL_Avatar_Atk_2xCombo01_Motion.npy',
+            dof_body_ids=self.dof_body_ids,
+            dof_offsets=self.dof_offsets,
+            key_body_ids=self.key_body_ids,
+            device=self.device,)
 
-        print("Demo Dataset Creating")
+        self.skeleton_tree = temp_ml.skeleton_tree
+
+        state = temp_ml.state
+
         self.demo_dataset = {
-            "root_pos": torch.zeros(motion_libs[0].actions.shape[0], state.root_pos.shape[1], device=self.device),
-            "root_rot": torch.zeros(motion_libs[0].actions.shape[0], state.root_rot.shape[1], device=self.device),
-            "root_vel": torch.zeros(motion_libs[0].actions.shape[0], state.root_vel.shape[1], device=self.device),
-            "root_ang_vel": torch.zeros(motion_libs[0].actions.shape[0], state.root_ang_vel.shape[1],
-                                        device=self.device),
-            "dof_pos": torch.zeros(motion_libs[0].actions.shape[0], state.dof_pos.shape[1], device=self.device),
-            "dof_vel": torch.zeros(motion_libs[0].actions.shape[0], state.dof_vel.shape[1], device=self.device),
-            "key_body_pos": torch.zeros(motion_libs[0].actions.shape[0], state.key_body_pos.shape[1],
-                                        state.key_body_pos.shape[2], device=self.device),
-            "DiscrimObs": torch.zeros(motion_libs[0].actions.shape[0], self.disc_obs_size,
-                                      device=self.device),
-            "Actions": torch.zeros(motion_libs[0].actions.shape[0], self.num_act, device=self.device),
-            "HumanoidObservations": torch.zeros(motion_libs[0].actions.shape[0], self.num_obs, device=self.device)
+            "root_pos": torch.zeros(self.dataset_len, state.root_pos.shape[1], device=self.device),
+            "root_rot": torch.zeros(self.dataset_len, state.root_rot.shape[1], device=self.device),
+            "root_vel": torch.zeros(self.dataset_len, state.root_vel.shape[1], device=self.device),
+            "root_ang_vel": torch.zeros(self.dataset_len, state.root_ang_vel.shape[1], device=self.device),
+            "dof_pos": torch.zeros(self.dataset_len, state.dof_pos.shape[1], device=self.device),
+            "dof_vel": torch.zeros(self.dataset_len, state.dof_vel.shape[1], device=self.device),
+            "key_body_pos": torch.zeros(self.dataset_len, state.key_body_pos.shape[1], state.key_body_pos.shape[2], device=self.device),
+            "DiscrimObs": torch.zeros(self.dataset_len, self.disc_obs_size, device=self.device),
+            "Actions": torch.zeros(self.dataset_len, self.num_act, device=self.device),
+            "HumanoidObservations": torch.zeros(self.dataset_len, self.num_obs, device=self.device)
         }
-
-        self.demo_dataset_len = motion_libs[0].actions.shape[0]
-
-        print("Dataset Processing START")
-        motion_libs = []
-        resets = []
-        for m_file in self.config.dataset_files:
-            motion_libs.append(StateActionLib(
-                motion_file=m_file,
-                dof_body_ids=self.dof_body_ids,
-                dof_offsets=self.dof_offsets,
-                key_body_ids=self.key_body_ids,
-                device=self.device,
-            ))
-            motion_dir = os.path.dirname(m_file)
-            motion_name = os.path.splitext(os.path.basename(m_file))[0]
-            reset_file = motion_dir + "/" + motion_name + "_reset.npy"
-            reset = torch.Tensor(np.load(reset_file)).to(self.device)
-            resets.append(reset)
-
-        print("Dataset Libs Loaded")
-        self.data_subsets = []
-        state = None
-        for i in range(len(motion_libs)):
-            lib = motion_libs[i]
-            reset = resets[i]
-            print(lib)
-            lib_set = {}
-            for motion_id in range(len(lib.state.motions)):
-                motion_len = lib.get_motion_length(motion_id)
-                dt = lib.get_motion(motion_id).time_delta
-
-                motion_times = torch.arange(0, motion_len, dt, device=self.device)
-                state = lib.get_motion_state(motion_id, motion_times)
-
-                lib_set[motion_id] = {
-                    "root_pos": state.root_pos,
-                    "root_rot": state.root_rot,
-                    "root_vel": state.root_vel,
-                    "root_ang_vel": state.root_ang_vel,
-                    "dof_pos": state.dof_pos,
-                    "dof_vel": state.dof_vel,
-                    "key_body_pos": state.key_body_pos,
-                    "Actions": state.action,
-                    "DiscrimObs": build_disc_action_observations(
-                        state.root_pos,
-                        state.root_rot,
-                        state.root_vel,
-                        state.root_ang_vel,
-                        state.dof_pos,
-                        state.dof_vel,
-                        state.key_body_pos,
-                        torch.zeros(1, device=self.device),
-                        state.action,
-                        self.all_config.env.config.humanoid_obs.local_root_obs,
-                        self.all_config.env.config.humanoid_obs.root_height_obs,
-                        self.all_config.robot.dof_obs_size,
-                        self.dof_offsets,
-                        False,
-                        self.w_last,
-                    ),
-                    "HumanoidObservations": compute_humanoid_observations_max(
-                        state.rb_pos,
-                        state.rb_rot,
-                        state.rb_vel,
-                        state.rb_ang_vel,
-                        torch.zeros(1, device=self.device),
-                        self.all_config.env.config.humanoid_obs.local_root_obs,
-                        self.all_config.env.config.humanoid_obs.root_height_obs,
-                        self.w_last,
-                    ),
-                    "Reset": reset
-                }
-            self.data_subsets.append(lib_set)
-
-        print("Dataset Creating")
-        self.dataset = {
-            "root_pos": torch.zeros(motion_libs[0].actions.shape[0], state.root_pos.shape[1], device=self.device),
-            "root_rot": torch.zeros(motion_libs[0].actions.shape[0], state.root_rot.shape[1], device=self.device),
-            "root_vel": torch.zeros(motion_libs[0].actions.shape[0], state.root_vel.shape[1], device=self.device),
-            "root_ang_vel": torch.zeros(motion_libs[0].actions.shape[0], state.root_ang_vel.shape[1],
-                                        device=self.device),
-            "dof_pos": torch.zeros(motion_libs[0].actions.shape[0], state.dof_pos.shape[1], device=self.device),
-            "dof_vel": torch.zeros(motion_libs[0].actions.shape[0], state.dof_vel.shape[1], device=self.device),
-            "key_body_pos": torch.zeros(motion_libs[0].actions.shape[0], state.key_body_pos.shape[1],
-                                        state.key_body_pos.shape[2], device=self.device),
-            "DiscrimObs": torch.zeros(motion_libs[0].actions.shape[0], self.disc_obs_size,
-                                      device=self.device),
-            "Actions": torch.zeros(motion_libs[0].actions.shape[0], self.num_act, device=self.device),
-            "HumanoidObservations": torch.zeros(motion_libs[0].actions.shape[0], self.num_obs, device=self.device),
-            "Reset": torch.zeros(motion_libs[0].actions.shape[0], device=self.device)
-        }
-
-        self.dataset_len = motion_libs[0].actions.shape[0]
+        self.dataset = {}
 
         self.update_steps_per_stage = 1
 
         pass
 
     def fill_dataset(self):
-        subset_ind = random.randint(0, len(self.demo_subsets) - 1)
-        motion_ids = list(self.demo_subsets[subset_ind].keys())
-        ds_strt_ind = 0
-        while len(motion_ids) > 0:
-            motion_id = random.choice(motion_ids)
-            motion_ids.remove(motion_id)
-            state = self.demo_subsets[subset_ind][motion_id]
-            state_len = state["root_pos"].shape[0]
-            self.demo_dataset["root_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["root_pos"]
-            self.demo_dataset["root_rot"][ds_strt_ind:ds_strt_ind + state_len] = state["root_rot"]
-            self.demo_dataset["root_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["root_vel"]
-            self.demo_dataset["root_ang_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["root_ang_vel"]
-            self.demo_dataset["dof_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_pos"]
-            self.demo_dataset["dof_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_vel"]
-            self.demo_dataset["key_body_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["key_body_pos"]
-            self.demo_dataset["DiscrimObs"][ds_strt_ind:ds_strt_ind + state_len] = self.make_disc_with_hist_obs(state["DiscrimObs"], torch.zeros(state["DiscrimObs"].shape[0]))
-            self.demo_dataset["HumanoidObservations"][ds_strt_ind:ds_strt_ind + state_len] = state[
-                "HumanoidObservations"]
-            self.demo_dataset["Actions"][ds_strt_ind:ds_strt_ind + state_len] = state["Actions"]
-            ds_strt_ind += state_len
+        filled = 0
+        while filled < self.dataset_len:
+            file_rand = random.choice(self.demo_dataset_files)
+            sk_state = SkeletonState.from_rotation_and_root_translation(
+                self.skeleton_tree, file_rand['global_rot'], file_rand['root_pos'], is_local=False
+            )
+            sk_motion = SkeletonMotion.from_skeleton_state(sk_state,30)
+            dataset_end = np.clip(filled + len(sk_motion), 0,self.dataset_len)
+            motion_end = np.clip(self.dataset_len - len(sk_motion), 0, len(sk_motion))
+            root_pos = sk_motion.root_translation[0:motion_end]
+            root_rot = sk_motion.global_root_rotation[0:motion_end]
+            root_vel = sk_motion.global_root_velocity[0:motion_end]
+            root_ang_vel = sk_motion.global_root_angular_velocity[0:motion_end]
+            dof_pos = _local_rotation_to_dof(dof_body_ids=self.dof_body_ids,
+                                             dof_offsets=self.dof_offsets,
+                                             num_dof=self.num_act,
+                                             device=self.device,
+                                             local_rot=sk_motion.local_rotation,
+                                             joint_3d_format='exp_map',)
+            dof_vel = sk_motion.dof_vel[0:motion_end]
+            key_body_pos = sk_motion.global_translation[0:motion_end, self.key_body_ids.unsqueeze(0)]
+            actions = file_rand['actions'][0:motion_end]
+            self.dataset['root_pos'][filled:dataset_end] = root_pos
+            self.dataset['root_rot'][filled:dataset_end] = root_rot
+            self.dataset['root_vel'][filled:dataset_end] = root_vel
+            self.dataset['root_ang_vel'][filled:dataset_end] = root_ang_vel
+            self.dataset['dof_pos'][filled:dataset_end] = dof_pos
+            self.dataset['dof_vel'][filled:dataset_end] = dof_vel
+            self.dataset['key_body_pos'] = key_body_pos
+            self.dataset['disc_obs'] = build_disc_action_observations(
+                                            root_pos,
+                                            root_rot,
+                                            root_vel,
+                                            root_ang_vel,
+                                            dof_pos,
+                                            dof_vel,
+                                            key_body_pos,
+                                            torch.zeros(1, device=self.device),
+                                            actions,
+                                            self.all_config.env.config.humanoid_obs.local_root_obs,
+                                            self.all_config.env.config.humanoid_obs.root_height_obs,
+                                            self.all_config.robot.dof_obs_size,
+                                            self.dof_offsets,
+                                            False,
+                                            self.w_last,
+                                        )
+            self.dataset['human_obs'] = compute_humanoid_observations_max(
+                                            sk_motion.global_translation,
+                                            sk_motion.global_rotation,
+                                            sk_motion.global_velocity,
+                                            sk_motion.global_angular_velocity,
+                                            torch.zeros(1, device=self.device),
+                                            self.all_config.env.config.humanoid_obs.local_root_obs,
+                                            self.all_config.env.config.humanoid_obs.root_height_obs,
+                                            self.w_last,
+                                        )
+            filled = dataset_end + 1
+
+
 
         subset_ind = random.randint(0, len(self.data_subsets) - 1)
         motion_ids = list(self.data_subsets[subset_ind].keys())
