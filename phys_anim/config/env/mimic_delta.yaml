@@ -7,7 +7,7 @@ defaults:
 env:
   _target_: phys_anim.envs.mimic.deltaaction.MimicHumanoidDelta
   config:
-    delta_checkpoint: results/deltaaction/lightning_logs/with_obs_action/last.ckpt
+    delta_checkpoint: results/deltaaction/lightning_logs/512_x2_noisy_rollout/last.ckpt
     deltaaction:
       _target_: phys_anim.agents.models.actor.ActorFixedSigma
       _recursive_: false
@@ -18,10 +18,6 @@ env:
           config:
             initializer: ${algo.config.actor.config.initializer}
             units:
-              - 512
-              - 512
-              - 512
-              - 512
               - 512
               - 512
             activation: ${algo.config.actor.config.activation}

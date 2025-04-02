@@ -22,7 +22,7 @@ algo:
       config:
         mu_model:
           config:
-            units: [512, 512, 512, 512, 512, 512]
+            units: [512, 512]
             extra_inputs:
               mjc_action: ${algo.config.models.mimic_mjc_action_model}
 
