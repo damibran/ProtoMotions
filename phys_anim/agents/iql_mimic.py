@@ -160,7 +160,6 @@ class IQL_Mimic:
         self.q_update_period = 1
         self.policy_update_period = 1
         self.target_update_period = 1
-        self.soft_target_tau = 0.005
 
         #state_dict = torch.load(Path.cwd() / "results/iql_mimic/lightning_logs/version_2/last.ckpt", map_location=self.device)
         #self.actor.load_state_dict(state_dict["actor"])

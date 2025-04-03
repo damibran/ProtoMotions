@@ -27,6 +27,12 @@ from isaac_utils import rotations, torch_utils
 from poselib.skeleton.skeleton3d import SkeletonMotion, SkeletonState, SkeletonTree
 from poselib.core.rotation3d import quat_angle_axis, quat_inverse, quat_mul_norm
 
+def soft_update_from_to(source, target, tau):
+    for target_param, param in zip(target.parameters(), source.parameters()):
+        target_param.data.copy_(
+            target_param.data * (1.0 - tau) + param.data * tau
+        )
+
 # jp hack
 # get rid of this ASAP, need a proper way of projecting from max coords to reduced coords
 def _local_rotation_to_dof(dof_body_ids,dof_offsets,num_dof, device, local_rot, joint_3d_format):
@@ -230,7 +236,7 @@ class IQL:
                                              num_dof=self.num_act,
                                              device=self.device,
                                              motion=sk_motion).to(self.device)
-            key_body_pos = sk_motion.global_translation[0:motion_end, self.key_body_ids.unsqueeze(0)].to(self.device)
+            key_body_pos = sk_motion.global_translation[0:motion_end, self.key_body_ids].to(self.device)
             actions = torch.from_numpy(file_rand['actions'][0:motion_end,0,...]).to(self.device)
             self.demo_dataset['root_pos'][filled:dataset_end] = root_pos
             self.demo_dataset['root_rot'][filled:dataset_end] = root_rot
@@ -240,15 +246,15 @@ class IQL:
             self.demo_dataset['dof_vel'][filled:dataset_end] = dof_vel
             self.demo_dataset['key_body_pos'] = key_body_pos
             self.demo_dataset['disc_obs'] = build_disc_action_observations(
-                                            root_pos.unsqueeze(1),
-                                            root_rot.unsqueeze(1),
-                                            root_vel.unsqueeze(1),
-                                            root_ang_vel.unsqueeze(1),
-                                            dof_pos.unsqueeze(1),
-                                            dof_vel.unsqueeze(1),
-                                            key_body_pos.unsqueeze(1),
+                                            root_pos,
+                                            root_rot,
+                                            root_vel,
+                                            root_ang_vel,
+                                            dof_pos,
+                                            dof_vel,
+                                            key_body_pos,
                                             torch.zeros(1, device=self.device),
-                                            actions.unsqueeze(1),
+                                            actions,
                                             self.all_config.env.config.humanoid_obs.local_root_obs,
                                             self.all_config.env.config.humanoid_obs.root_height_obs,
                                             self.all_config.robot.dof_obs_size,
@@ -257,69 +263,89 @@ class IQL:
                                             self.w_last,
                                         )
             self.demo_dataset['human_obs'] = compute_humanoid_observations_max(
-                                            sk_motion.global_translation,
-                                            sk_motion.global_rotation,
-                                            sk_motion.global_velocity,
-                                            sk_motion.global_angular_velocity,
+                                            sk_motion.global_translation.to(self.device),
+                                            sk_motion.global_rotation.to(self.device),
+                                            sk_motion.global_velocity.to(self.device),
+                                            sk_motion.global_angular_velocity.to(self.device),
                                             torch.zeros(1, device=self.device),
                                             self.all_config.env.config.humanoid_obs.local_root_obs,
                                             self.all_config.env.config.humanoid_obs.root_height_obs,
                                             self.w_last,
                                         )
-            filled = dataset_end + 1
+            filled += dataset_end
 
-
-
-        subset_ind = random.randint(0, len(self.data_subsets) - 1)
-        motion_ids = list(self.data_subsets[subset_ind].keys())
-        ds_strt_ind = 0
-        while len(motion_ids) > 0:
-            motion_id = random.choice(motion_ids)
-            motion_ids.remove(motion_id)
-            state = self.data_subsets[subset_ind][motion_id]
-            state_len = state["root_pos"].shape[0]
-            self.dataset["root_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["root_pos"]
-            self.dataset["root_rot"][ds_strt_ind:ds_strt_ind + state_len] = state["root_rot"]
-            self.dataset["root_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["root_vel"]
-            self.dataset["root_ang_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["root_ang_vel"]
-            self.dataset["dof_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_pos"]
-            self.dataset["dof_vel"][ds_strt_ind:ds_strt_ind + state_len] = state["dof_vel"]
-            self.dataset["key_body_pos"][ds_strt_ind:ds_strt_ind + state_len] = state["key_body_pos"]
-            self.dataset["DiscrimObs"][ds_strt_ind:ds_strt_ind + state_len] = self.make_disc_with_hist_obs(state["DiscrimObs"], state["Reset"])
-            self.dataset["HumanoidObservations"][ds_strt_ind:ds_strt_ind + state_len] = state["HumanoidObservations"]
-            self.dataset["Actions"][ds_strt_ind:ds_strt_ind + state_len] = state["Actions"]
-            self.dataset["Reset"][ds_strt_ind:ds_strt_ind + state_len] = state["Reset"]
-            ds_strt_ind += state_len
+        file_rand = random.choice(self.dataset_files)
+        env_rand = random.randint(0,file_rand['global_rot'].shape[1] - 1)
+        global_rot = torch.from_numpy(file_rand['global_rot'][:, env_rand, ...])
+        root_pos = torch.from_numpy(file_rand['root_pos'][:, env_rand, ...])
+        sk_state = SkeletonState.from_rotation_and_root_translation(
+            self.skeleton_tree,
+            global_rot,
+            root_pos,
+            is_local=False
+        )
+        sk_motion = SkeletonMotion.from_skeleton_state(sk_state, 30)
+        root_pos = sk_motion.root_translation.to(self.device)
+        root_rot = sk_motion.global_root_rotation.to(self.device)
+        root_vel = sk_motion.global_root_velocity.to(self.device)
+        root_ang_vel = sk_motion.global_root_angular_velocity.to(self.device)
+        dof_pos = _local_rotation_to_dof(dof_body_ids=self.dof_body_ids,
+                                         dof_offsets=self.dof_offsets,
+                                         num_dof=self.num_act,
+                                         device=self.device,
+                                         local_rot=sk_motion.local_rotation,
+                                         joint_3d_format='exp_map', ).to(self.device)
+        dof_vel = _compute_motion_dof_vels(dof_body_ids=self.dof_body_ids,
+                                           dof_offsets=self.dof_offsets,
+                                           num_dof=self.num_act,
+                                           device=self.device,
+                                           motion=sk_motion).to(self.device)
+        key_body_pos = sk_motion.global_translation[:, self.key_body_ids].to(self.device)
+        actions = torch.from_numpy(file_rand['actions'][:, env_rand, ...]).to(self.device)
+        self.dataset['root_pos'] = root_pos
+        self.dataset['root_rot'] = root_rot
+        self.dataset['root_vel'] = root_vel
+        self.dataset['root_ang_vel'] = root_ang_vel
+        self.dataset['dof_pos'] = dof_pos
+        self.dataset['dof_vel'] = dof_vel
+        self.dataset['key_body_pos'] = key_body_pos
+        self.dataset['disc_obs'] = build_disc_action_observations(
+                                            root_pos,
+                                            root_rot,
+                                            root_vel,
+                                            root_ang_vel,
+                                            dof_pos,
+                                            dof_vel,
+                                            key_body_pos,
+                                            torch.zeros(1, device=self.device),
+                                            actions,
+                                            self.all_config.env.config.humanoid_obs.local_root_obs,
+                                            self.all_config.env.config.humanoid_obs.root_height_obs,
+                                            self.all_config.robot.dof_obs_size,
+                                            self.dof_offsets,
+                                            False,
+                                            self.w_last,
+                                        )
+        self.dataset['human_obs'] = compute_humanoid_observations_max(
+                                            sk_motion.global_translation.to(self.device),
+                                            sk_motion.global_rotation.to(self.device),
+                                            sk_motion.global_velocity.to(self.device),
+                                            sk_motion.global_angular_velocity.to(self.device),
+                                            torch.zeros(1, device=self.device),
+                                            self.all_config.env.config.humanoid_obs.local_root_obs,
+                                            self.all_config.env.config.humanoid_obs.root_height_obs,
+                                            self.w_last,
+                                        )
+        self.dataset['actions'] = actions
+        self.dataset['dones'] = torch.from_numpy(file_rand['dones'][:, env_rand, ...]).to(self.device)
 
     def dataset_roll(self):
 
-        self.demo_dataset["root_pos"] = torch.roll(self.demo_dataset["root_pos"], shifts=-self.config.batch_size)
-        self.demo_dataset["root_rot"] = torch.roll(self.demo_dataset["root_rot"], shifts=-self.config.batch_size)
-        self.demo_dataset["root_vel"] = torch.roll(self.demo_dataset["root_vel"], shifts=-self.config.batch_size)
-        self.demo_dataset["root_ang_vel"] = torch.roll(self.demo_dataset["root_ang_vel"],
-                                                       shifts=-self.config.batch_size)
-        self.demo_dataset["dof_pos"] = torch.roll(self.demo_dataset["dof_pos"], shifts=-self.config.batch_size)
-        self.demo_dataset["dof_vel"] = torch.roll(self.demo_dataset["dof_vel"], shifts=-self.config.batch_size)
-        self.demo_dataset["key_body_pos"] = torch.roll(self.demo_dataset["key_body_pos"],
-                                                       shifts=-self.config.batch_size)
-        self.demo_dataset["DiscrimObs"] = torch.roll(self.demo_dataset["DiscrimObs"], shifts=-self.config.batch_size)
-        self.demo_dataset["HumanoidObservations"] = torch.roll(self.demo_dataset["HumanoidObservations"],
-                                                               shifts=-self.config.batch_size)
-        self.demo_dataset["Actions"] = torch.roll(self.demo_dataset["Actions"], shifts=-self.config.batch_size)
+        for key in self.demo_dataset.keys():
+            self.demo_dataset[key] = torch.roll(self.demo_dataset[key], shifts=-self.config.batch_size)
 
-        self.dataset["latents"] = torch.roll(self.dataset["latents"], shifts=-self.config.batch_size)
-        self.dataset["root_pos"] = torch.roll(self.dataset["root_pos"], shifts=-self.config.batch_size)
-        self.dataset["root_rot"] = torch.roll(self.dataset["root_rot"], shifts=-self.config.batch_size)
-        self.dataset["root_vel"] = torch.roll(self.dataset["root_vel"], shifts=-self.config.batch_size)
-        self.dataset["root_ang_vel"] = torch.roll(self.dataset["root_ang_vel"], shifts=-self.config.batch_size)
-        self.dataset["dof_pos"] = torch.roll(self.dataset["dof_pos"], shifts=-self.config.batch_size)
-        self.dataset["dof_vel"] = torch.roll(self.dataset["dof_vel"], shifts=-self.config.batch_size)
-        self.dataset["key_body_pos"] = torch.roll(self.dataset["key_body_pos"], shifts=-self.config.batch_size)
-        self.dataset["DiscrimObs"] = torch.roll(self.dataset["DiscrimObs"], shifts=-self.config.batch_size)
-        self.dataset["HumanoidObservations"] = torch.roll(self.dataset["HumanoidObservations"],
-                                                          shifts=-self.config.batch_size)
-        self.dataset["Actions"] = torch.roll(self.dataset["Actions"], shifts=-self.config.batch_size)
-        self.dataset["Reset"] = torch.roll(self.dataset["Reset"], shifts=-self.config.batch_size)
+        for key in self.dataset.keys():
+            self.dataset[key] = torch.roll(self.dataset[key], shifts=-self.config.batch_size)
 
     def setup(self):
         actor: PPO_Actor = instantiate(
@@ -336,30 +362,47 @@ class IQL:
         self.actor.mark_forward_method("eval_forward")
         self.actor.mark_forward_method("training_forward")
 
-        critic_s: NormObsBase = instantiate(
+        qf1: NormObsBase = instantiate(
+            self.config.critic_sa, num_in=self.num_obs, num_out=1
+        )
+        qf1_optimizer = instantiate(
+            self.config.critic_optimizer,
+            params=list(qf1.parameters()),
+        )
+        self.qf1, self.qf1_optimizer = self.fabric.setup(qf1, qf1_optimizer)
+
+        qf2: NormObsBase = instantiate(
+            self.config.critic_sa, num_in=self.num_obs, num_out=1
+        )
+        qf2_optimizer = instantiate(
+            self.config.critic_optimizer,
+            params=list(qf2.parameters()),
+        )
+        self.qf2, self.qf2_optimizer = self.fabric.setup(qf2, qf2_optimizer)
+
+        target_qf1: NormObsBase = instantiate(
+            self.config.critic_sa, num_in=self.num_obs, num_out=1
+        )
+        target_qf1.load_state_dict(self.qf1.state_dict())
+        self.target_qf1 = self.fabric.setup(target_qf1)
+
+        target_qf2: NormObsBase = instantiate(
+            self.config.critic_sa, num_in=self.num_obs, num_out=1
+        )
+        target_qf2.load_state_dict(self.qf2.state_dict())
+        self.target_qf2 = self.fabric.setup(target_qf2)
+
+        vf: NormObsBase = instantiate(
             self.config.critic_s, num_in=self.num_obs, num_out=1
         )
-        critic_optimizer = instantiate(
+        vf_optimizer = instantiate(
             self.config.critic_optimizer,
-            params=list(critic_s.parameters()),
+            params=list(vf.parameters()),
         )
-        self.critic_s, self.critic_s_optimizer = self.fabric.setup(critic_s, critic_optimizer)
+        self.vf, self.vf_optimizer = self.fabric.setup(vf, vf_optimizer)
 
-        critic_sa: NormObsBase = instantiate(
-            self.config.critic_sa, num_in=self.num_obs, num_out=1
-        )
-        critic_sa_optimizer = instantiate(
-            self.config.critic_optimizer,
-            params=list(critic_sa.parameters()),
-        )
-        self.critic_sa, self.critic_sa_optimizer = self.fabric.setup(critic_sa, critic_sa_optimizer)
-        self.critic_sa_criterion = nn.MSELoss()
-
-        target_critic: NormObsBase = instantiate(
-            self.config.critic_sa, num_in=self.num_obs, num_out=1
-        )
-
-        self.target_critic = self.fabric.setup(target_critic)
+        self.qf_criterion = nn.MSELoss()
+        self.vf_criterion = nn.MSELoss()
 
         discriminator: JointDiscWithMutualInformationEncMLP = instantiate(
             self.config.discriminator,
@@ -375,9 +418,15 @@ class IQL:
             discriminator, discriminator_optimizer
         )
 
-        state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_6/last.ckpt", map_location=self.device)
-        self.actor.load_state_dict(state_dict["actor"])
-        self.save(name="last_a.ckpt")
+        self._n_train_steps_total = 0
+        self.q_update_period = 1
+        self.policy_update_period = 1
+        self.target_update_period = 1
+        self.disc_update_period = 1
+
+        #state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_6/last.ckpt", map_location=self.device)
+        #self.actor.load_state_dict(state_dict["actor"])
+        #self.save(name="last_a.ckpt")
 
     def fit(self):
 
@@ -395,84 +444,6 @@ class IQL:
             desciptor_r = torch.zeros(self.update_steps_per_stage * batch_count)
             enc_r = torch.zeros(self.update_steps_per_stage * batch_count)
             total_r = torch.zeros(self.update_steps_per_stage * batch_count)
-            for i in range(self.update_steps_per_stage):
-                for batch_id in range(batch_count):
-
-                    self.dataset_roll()
-
-                    batch = {
-                        "latents": self.dataset["latents"][0:self.config.batch_size],
-                        "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
-                        "HumanoidObservations": self.dataset["HumanoidObservations"][0:self.config.batch_size],
-                        "Actions": self.dataset["Actions"][0:self.config.batch_size],
-                        "Reset": self.dataset["Reset"][0:self.config.batch_size],
-                    }
-
-                    desc_r = self.calculate_discriminator_reward(
-                        batch["DiscrimObs"]).squeeze()  # torch.ones(self.config.batch_size, device=self.device)
-                    mi_r = self.calc_mi_reward(batch["DiscrimObs"], batch["latents"])
-
-                    reward = desc_r.detach() + mi_r.detach() + 1
-
-                    desciptor_r[batch_id * self.update_steps_per_stage + i] = desc_r.mean().detach()
-                    enc_r[batch_id * self.update_steps_per_stage + i] = mi_r.mean().detach()
-                    total_r[batch_id * self.update_steps_per_stage + i] = reward.mean().detach()
-
-                    """
-                    VF Loss
-                    """
-                    self.target_critic.train()
-                    self.critic_s.train()
-                    q_pred = self.target_critic(
-                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"],
-                         "latents": batch["latents"]}).detach()
-                    vf_pred = self.critic_s({"obs": batch["HumanoidObservations"], "latents": batch["latents"]})
-                    vf_err = vf_pred - q_pred
-                    vf_sign = (vf_err > 0).float()
-                    vf_weight = (1 - vf_sign) * self.expectile + vf_sign * (1 - self.expectile)
-                    value_loss = (vf_weight * (vf_err ** 2)).mean()
-
-                    v_loss_tensor[batch_id * self.update_steps_per_stage + i] = value_loss.mean().detach()
-
-                    """
-                    QF Loss
-                    """
-
-                    next_obs = torch.roll(batch["HumanoidObservations"], shifts=-1, dims=0)
-                    next_latents = torch.roll(batch["latents"], shifts=-1, dims=0)
-
-                    q_target = reward + (1. - batch["Reset"]) * self.discount * self.critic_s(
-                        {"obs": next_obs, "latents": next_latents}).detach()
-                    q_target = q_target.detach()
-                    q_pred = self.critic_sa({"obs": batch["HumanoidObservations"], "actions": batch["Actions"],
-                                             "latents": batch["latents"]})
-
-                    q_loss = self.critic_sa_criterion(q_target, q_pred)
-
-                    q_loss_tensor[batch_id * self.update_steps_per_stage + i] = q_loss.mean().detach()
-
-                    """
-                    Step
-                    """
-
-                    self.critic_s_optimizer.zero_grad()
-                    self.fabric.backward(value_loss.mean())
-                    self.critic_s_optimizer.step()
-
-                    self.critic_sa_optimizer.zero_grad()
-                    self.fabric.backward(q_loss.mean())
-                    self.critic_sa_optimizer.step()
-
-                    for param_cur, param_target in zip(self.critic_sa.parameters(), self.target_critic.parameters()):
-                        param_target.data = (1 - self.alpha) * param_target.data + self.alpha * param_cur.data
-
-            self.log_dict.update({
-                "reward/desc": desciptor_r.mean(),
-                "reward/end": enc_r.mean(),
-                "reward/total": total_r.mean()
-            })
-            self.log_dict.update({"ac/v_loss": v_loss_tensor.mean()})
-            self.log_dict.update({"ac/q_loss": q_loss_tensor.mean()})
 
             a_loss_tensor_adw_exp = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_adw_neglog = torch.zeros(self.update_steps_per_stage * batch_count)
@@ -481,66 +452,10 @@ class IQL:
             a_loss_tensor_div = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_total = torch.zeros(self.update_steps_per_stage * batch_count)
 
-            print(f'Actor Step')
-            for i in range(self.update_steps_per_stage):
-                for batch_id in range(batch_count):
-                    self.dataset_roll()
-
-                    batch = {
-                        "latents": self.dataset["latents"][0:self.config.batch_size],
-                        "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
-                        "HumanoidObservations": self.dataset["HumanoidObservations"][0:self.config.batch_size],
-                        "Actions": self.dataset["Actions"][0:self.config.batch_size]
-                    }
-
-                    self.actor.training = True
-                    actor_out = self.actor.training_forward(
-                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"],
-                         "latents": batch["latents"]})
-
-                    self.target_critic.eval()
-                    self.critic_s.eval()
-                    q_val = self.target_critic(
-                        {"obs": batch["HumanoidObservations"], "actions": batch["Actions"],
-                         "latents": batch["latents"]})
-                    v_val = self.critic_s({"obs": batch["HumanoidObservations"], "latents": batch["latents"]})
-
-                    adv = q_val.detach() - v_val.detach()
-                    exp_adv = torch.exp(adv / self.beta)
-                    exp_adv = torch.clamp(exp_adv, max=100)
-
-                    actor_adw_loss = (exp_adv * actor_out["neglogp"]).mean()
-
-                    a_loss_tensor_adw_exp[batch_id * self.update_steps_per_stage + i] = exp_adv.mean().detach()
-                    a_loss_tensor_adw_neglog[batch_id * self.update_steps_per_stage + i] = actor_out[
-                        "neglogp"].mean().detach()
-                    a_loss_tensor_adw_b_c[batch_id * self.update_steps_per_stage + i] = actor_adw_loss.detach()
-
-                    # actor_adw_loss = torch.clamp(actor_adw_loss,max=100)
-
-                    actor_div_loss, div_loss_log = self.calculate_extra_actor_loss(
-                        {"obs": batch["HumanoidObservations"], "latents": batch["latents"],
-                         "actions": batch["Actions"]})
-
-                    actor_loss = actor_adw_loss + actor_div_loss
-
-                    a_loss_tensor_adw[batch_id * self.update_steps_per_stage + i] = actor_adw_loss.mean().detach()
-                    a_loss_tensor_div[batch_id * self.update_steps_per_stage + i] = actor_div_loss.mean().detach()
-                    a_loss_tensor_total[batch_id * self.update_steps_per_stage + i] = actor_loss.mean().detach()
-
-                    self.actor_optimizer.zero_grad()
-                    self.fabric.backward(actor_loss.mean())
-                    self.actor_optimizer.step()
-
-            self.log_dict.update({"actor_loss/adw_exp": a_loss_tensor_adw_exp.mean()})
-            self.log_dict.update({"actor_loss/neg_log": a_loss_tensor_adw_neglog.mean()})
-            self.log_dict.update({"actor_loss/adw_before_clip": a_loss_tensor_adw_b_c.mean()})
-            self.log_dict.update({"actor_loss/adw_after_clip": a_loss_tensor_adw.mean()})
-            self.log_dict.update({"actor_loss/div": a_loss_tensor_div.mean()})
-            self.log_dict.update({"actor_loss/total": a_loss_tensor_total.mean()})
 
             for i in range(self.update_steps_per_stage):
                 for batch_id in range(batch_count):
+
                     self.dataset_roll()
 
                     batch = {
@@ -553,9 +468,10 @@ class IQL:
                         "dof_vel": self.dataset["dof_vel"][0:self.config.batch_size],
                         "dof_vel": self.dataset["dof_vel"][0:self.config.batch_size],
                         "key_body_pos": self.dataset["key_body_pos"][0:self.config.batch_size],
-                        "DiscrimObs": self.dataset["DiscrimObs"][0:self.config.batch_size],
-                        "HumanoidObservations": self.dataset["HumanoidObservations"][0:self.config.batch_size],
-                        "Actions": self.dataset["Actions"][0:self.config.batch_size]
+                        "disc_obs": self.dataset["disc_obs"][0:self.config.batch_size],
+                        "human_obs": self.dataset["human_obs"][0:self.config.batch_size],
+                        "actions": self.dataset["actions"][0:self.config.batch_size],
+                        'dones': self.dataset['dones'][0:self.config.batch_size]
                     }
 
                     demo_batch = {
@@ -567,15 +483,82 @@ class IQL:
                         "dof_vel": self.demo_dataset["dof_vel"][0:self.config.batch_size],
                         "dof_vel": self.demo_dataset["dof_vel"][0:self.config.batch_size],
                         "key_body_pos": self.demo_dataset["key_body_pos"][0:self.config.batch_size],
-                        "DiscrimObs": self.demo_dataset["DiscrimObs"][0:self.config.batch_size],
-                        "HumanoidObservations": self.demo_dataset["HumanoidObservations"][0:self.config.batch_size],
-                        "Actions": self.demo_dataset["Actions"][0:self.config.batch_size]
+                        "disc_obs": self.demo_dataset["disc_obs"][0:self.config.batch_size],
+                        "human_obs": self.demo_dataset["human_obs"][0:self.config.batch_size],
+                        "actions": self.demo_dataset["actions"][0:self.config.batch_size]
                     }
+
+                    next_obs = torch.roll(batch["human_obs"], shifts=-1, dims=0)
+                    next_latents = torch.roll(batch["latents"], shifts=-1, dims=0)
+
+
+                    desc_r = self.calculate_discriminator_reward(
+                        batch["disc_obs"]).squeeze()  # torch.ones(self.config.batch_size, device=self.device)
+                    mi_r = self.calc_mi_reward(batch["disc_obs"], batch["latents"])
+
+                    reward = desc_r.detach() + mi_r.detach() + 1
+
+                    """
+                    QF Loss
+                    """
+                    q1_pred = self.qf1({"obs": batch["human_obs"], "actions": batch["actions"],
+                         "latents": batch["latents"]})
+                    q2_pred = self.qf2({"obs": batch["human_obs"], "actions": batch["actions"],
+                         "latents": batch["latents"]})
+                    target_vf_pred = self.vf({"obs": next_obs, "latents": next_latents}).detach()
+
+                    q_target = reward + (1. - batch['dones']) * self.discount * target_vf_pred
+                    q_target = q_target.detach()
+                    qf1_loss = self.qf_criterion(q1_pred, q_target)
+                    qf2_loss = self.qf_criterion(q2_pred, q_target)
+
+                    """
+                    VF Loss
+                    """
+                    q_pred = torch.min(
+                        self.target_qf1({"obs": batch["human_obs"], "actions": batch["actions"],
+                         "latents": batch["latents"]}),
+                        self.target_qf2({"obs": batch["human_obs"], "actions": batch["actions"],
+                         "latents": batch["latents"]}),
+                    ).detach()
+                    vf_pred = self.vf({"obs": batch["human_obs"], "latents": batch["latents"]})
+                    vf_err = vf_pred - q_pred
+                    vf_sign = (vf_err > 0).float()
+                    vf_weight = (1 - vf_sign) * self.expectile + vf_sign * (1 - self.expectile)
+                    vf_loss = (vf_weight * (vf_err ** 2)).mean()
+
+                    """
+                    Policy Loss
+                    """
+                    self.actor.training = True
+                    actor_out = self.actor.training_forward(
+                        {"obs": batch["obs"],
+                         "actions": batch["actions"],
+                         "latents": batch["latents"]})
+
+                    policy_logpp = -actor_out["neglogp"]
+
+                    adv = q_pred - vf_pred
+                    exp_adv = torch.exp(adv / self.beta)
+                    exp_adv = torch.clamp(exp_adv, max=100)
+
+                    weights = exp_adv.detach()  # exp_adv[:, 0].detach()
+                    actor_adw_loss = (-policy_logpp * weights).mean()
+
+                    actor_div_loss, div_loss_log = self.calculate_extra_actor_loss(
+                        {"obs": batch["human_obs"], "latents": batch["latents"],
+                         "actions": batch["actions"]})
+
+                    actor_loss = actor_adw_loss + actor_div_loss
+
+                    """
+                    Disc Step
+                    """
 
                     self.actor.training = False
                     with torch.no_grad():
                         actor_eval_out = self.actor.eval_forward(
-                            {"obs": batch["HumanoidObservations"], "latents": batch["latents"]})
+                            {"obs": batch["human_obs"], "latents": batch["latents"]})
 
                     agent_disc_obs = build_disc_action_observations(
                         batch["root_pos"],
@@ -595,16 +578,86 @@ class IQL:
                         self.w_last,
                     )
 
-                    agent_disc_obs = self.make_disc_with_hist_obs(agent_disc_obs,torch.zeros(agent_disc_obs.shape[0], device=self.device))
+                    agent_disc_obs = self.make_disc_with_hist_obs(agent_disc_obs, torch.zeros(agent_disc_obs.shape[0],
+                                                                                              device=self.device))
 
                     disc_loss, disc_log_dict = self.encoder_step(
                         {"AgentDiscObs": agent_disc_obs, "DemoDiscObs": demo_batch["DiscrimObs"],
                          "latents": batch["latents"]})
-                    self.log_dict.update(disc_log_dict)
 
-                    self.discriminator_optimizer.zero_grad()
-                    self.fabric.backward(disc_loss)
-                    self.discriminator_optimizer.step()
+                    """
+                    Update networks
+                    """
+                    if self._n_train_steps_total % self.q_update_period == 0:
+                        self.qf1_optimizer.zero_grad()
+                        qf1_loss.backward()
+                        self.qf1_optimizer.step()
+
+                        self.qf2_optimizer.zero_grad()
+                        qf2_loss.backward()
+                        self.qf2_optimizer.step()
+
+                        self.vf_optimizer.zero_grad()
+                        vf_loss.backward()
+                        self.vf_optimizer.step()
+
+                    if self._n_train_steps_total % self.policy_update_period == 0:
+                        self.actor_optimizer.zero_grad()
+                        actor_loss.backward()
+                        self.actor_optimizer.step()
+
+                    if self._n_train_steps_total % self.disc_update_period == 0:
+                        self.discriminator_optimizer.zero_grad()
+                        self.fabric.backward(disc_loss)
+                        self.discriminator_optimizer.step()
+
+                    """
+                    Soft Updates
+                    """
+                    if self._n_train_steps_total % self.target_update_period == 0:
+                        soft_update_from_to(
+                            self.qf1, self.target_qf1, self.alpha
+                        )
+                        soft_update_from_to(
+                            self.qf2, self.target_qf2, self.alpha
+                        )
+
+                    self._n_train_steps_total += 1
+
+                    """
+                    Log
+                    """
+                    desciptor_r[batch_id * self.update_steps_per_stage + i] = desc_r.mean().detach()
+                    enc_r[batch_id * self.update_steps_per_stage + i] = mi_r.mean().detach()
+                    total_r[batch_id * self.update_steps_per_stage + i] = reward.mean().detach()
+
+                    q_loss_tensor[batch_id * self.update_steps_per_stage + i] = (qf1_loss.mean().detach() + qf2_loss.mean().detach()) / 2.
+
+                    v_loss_tensor[batch_id * self.update_steps_per_stage + i] = vf_loss.mean().detach()
+
+                    a_loss_tensor_adw[batch_id * self.update_steps_per_stage + i] = actor_adw_loss.mean().detach()
+                    a_loss_tensor_div[batch_id * self.update_steps_per_stage + i] = actor_div_loss.mean().detach()
+                    a_loss_tensor_total[batch_id * self.update_steps_per_stage + i] = actor_loss.mean().detach()
+                    a_loss_tensor_adw_exp[batch_id * self.update_steps_per_stage + i] = exp_adv.mean().detach()
+                    a_loss_tensor_adw_neglog[batch_id * self.update_steps_per_stage + i] = actor_out[
+                        "neglogp"].mean().detach()
+
+            self.log_dict.update({
+                "reward/desc": desciptor_r.mean(),
+                "reward/end": enc_r.mean(),
+                "reward/total": total_r.mean(),
+                "ac/v_loss": v_loss_tensor.mean(),
+                "ac/q_loss": q_loss_tensor.mean(),
+                "actor_loss/adw_exp": a_loss_tensor_adw_exp.mean(),
+                "actor_loss/neg_log": a_loss_tensor_adw_neglog.mean(),
+                "actor_loss/adw_before_clip": a_loss_tensor_adw_b_c.mean(),
+                "actor_loss/adw_after_clip": a_loss_tensor_adw.mean(),
+                "actor_loss/div": a_loss_tensor_div.mean(),
+                "actor_loss/total": a_loss_tensor_total.mean(),
+            })
+            self.log_dict.update({
+                disc_log_dict
+            })
 
             self.fabric.log_dict(self.log_dict, self.current_epoch)
 
