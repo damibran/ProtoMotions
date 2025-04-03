@@ -4,14 +4,30 @@ algo:
   config:
 
     dataset_files:
-      - output/recordings/000/RL_Avatar_Idle_Ready_Motion.npy
-      - output/recordings/001/RL_Avatar_Idle_Ready_Motion.npy
+      - output/recordings/mimic_train/RL_Avatar_Atk_2xCombo01_Motion/dataset.hdf5
+      - output/recordings/mimic_train/RL_Avatar_Atk_Kick_Motion/dataset.hdf5
+      - output/recordings/mimic_train/RL_Avatar_Counter_Atk03_Motion/dataset.hdf5
+      - output/recordings/mimic_train/RL_Avatar_Idle_Ready_Motion/dataset.hdf5
+      - output/recordings/mimic_train/RL_Avatar_RunBackward_Motion/dataset.hdf5
+      - output/recordings/mimic_train/RL_Avatar_RunForward_Motion/dataset.hdf5
+      - output/recordings/mimic_train/RL_Avatar_RunRight_Motion/dataset.hdf5
+      - output/recordings/mimic_train/RL_Avatar_TurnLeft90_Motion/dataset.hdf5
+      - output/recordings/mimic_train/RL_Avatar_TurnLeft180_Motion/dataset.hdf5
+      - output/recordings/mimic_train/RL_Avatar_TurnRight90_Motion/dataset.hdf5
+      - output/recordings/mimic_train/RL_Avatar_TurnRight180_Motion/dataset.hdf5
 
-    motion_files:
-      - output/recordings/IQL_seconddataset/sword_shield_state_action_0.yaml
-      #- output/recordings/IQL_seconddataset/sword_shield_state_action_1.yaml
-      #- output/recordings/IQL_seconddataset/sword_shield_state_action_2.yaml
-      #- output/recordings/IQL_seconddataset/sword_shield_state_action_3.yaml
+    demo_dataset_files:
+      - output/recordings/mimic_eval/RL_Avatar_Atk_2xCombo01_Motion/dataset.hdf5
+      - output/recordings/mimic_eval/RL_Avatar_Atk_Kick_Motion/dataset.hdf5
+      - output/recordings/mimic_eval/RL_Avatar_Counter_Atk03_Motion/dataset.hdf5
+      - output/recordings/mimic_eval/RL_Avatar_Idle_Ready_Motion/dataset.hdf5
+      - output/recordings/mimic_eval/RL_Avatar_RunBackward_Motion/dataset.hdf5
+      - output/recordings/mimic_eval/RL_Avatar_RunForward_Motion/dataset.hdf5
+      - output/recordings/mimic_eval/RL_Avatar_RunRight_Motion/dataset.hdf5
+      - output/recordings/mimic_eval/RL_Avatar_TurnLeft90_Motion/dataset.hdf5
+      - output/recordings/mimic_eval/RL_Avatar_TurnLeft180_Motion/dataset.hdf5
+      - output/recordings/mimic_eval/RL_Avatar_TurnRight90_Motion/dataset.hdf5
+      - output/recordings/mimic_eval/RL_Avatar_TurnRight180_Motion/dataset.hdf5
 
     models:
       terrain_models:

@@ -1,5 +1,6 @@
 import os.path
 import random
+from copy import deepcopy
 from pathlib import Path
 from typing import List, Tuple, Dict
 import torch
@@ -23,7 +24,8 @@ import h5py
 from poselib.skeleton.skeleton3d import SkeletonMotion, SkeletonState
 from utils.motion_lib import MotionLib
 from isaac_utils import rotations, torch_utils
-
+from poselib.skeleton.skeleton3d import SkeletonMotion, SkeletonState, SkeletonTree
+from poselib.core.rotation3d import quat_angle_axis, quat_inverse, quat_mul_norm
 
 # jp hack
 # get rid of this ASAP, need a proper way of projecting from max coords to reduced coords
@@ -68,6 +70,55 @@ def _local_rotation_to_dof(dof_body_ids,dof_offsets,num_dof, device, local_rot, 
 
     return dof_pos
 
+def _local_rotation_to_dof_vel(dof_body_ids,dof_offsets, num_dof, device, local_rot0, local_rot1, dt):
+    body_ids = dof_body_ids
+    dof_offsets = dof_offsets
+
+    dof_vel = torch.zeros([num_dof], device=device)
+
+    diff_quat_data = quat_mul_norm(quat_inverse(local_rot0), local_rot1)
+    diff_angle, diff_axis = quat_angle_axis(diff_quat_data)
+    local_vel = diff_axis * diff_angle.unsqueeze(-1) / dt
+    local_vel = local_vel
+
+    for j in range(len(body_ids)):
+        body_id = body_ids[j]
+        joint_offset = dof_offsets[j]
+        joint_size = dof_offsets[j + 1] - joint_offset
+
+        if joint_size == 3:
+            joint_vel = local_vel[body_id]
+            dof_vel[joint_offset : (joint_offset + joint_size)] = joint_vel
+
+        elif joint_size == 1:
+            assert joint_size == 1
+            joint_vel = local_vel[body_id]
+            dof_vel[joint_offset] = joint_vel[
+                1
+            ]  # assume joint is always along y axis
+
+        else:
+            print("Unsupported joint type")
+            assert False
+
+    return dof_vel
+
+def _compute_motion_dof_vels(dof_body_ids,dof_offsets, num_dof, device,motion: SkeletonMotion):
+    num_frames = motion.global_translation.shape[0]
+    dt = 1.0 / motion.fps
+    dof_vels = []
+
+    for f in range(num_frames - 1):
+        local_rot0 = motion.local_rotation[f]
+        local_rot1 = motion.local_rotation[f + 1]
+        frame_dof_vel = _local_rotation_to_dof_vel(dof_body_ids,dof_offsets, num_dof, device,local_rot0, local_rot1, dt)
+        dof_vels.append(frame_dof_vel)
+
+    dof_vels.append(dof_vels[-1])
+    dof_vels = torch.stack(dof_vels, dim=0)
+
+    return dof_vels
+
 # def list_roll(inlist, n):
 #    for i in range(n):
 #        inlist.append(inlist.pop(0))
@@ -110,12 +161,12 @@ class IQL:
         )
 
         self.demo_dataset_files = []
-        for path in self.all_config.algo.config.motion_files:
+        for path in self.all_config.algo.config.demo_dataset_files:
             self.demo_dataset_files.append(h5py.File(path, "r"))
 
         self.dataset_files = []
         for path in self.all_config.algo.config.dataset_files:
-            self.dataset_files.append(h5py.File(self.all_config.algo.config.dataset_file, "r"))
+            self.dataset_files.append(h5py.File(path, "r"))
 
         self.dataset_len = self.dataset_files[0]["dones"].shape[0]
 
@@ -126,9 +177,10 @@ class IQL:
             key_body_ids=self.key_body_ids,
             device=self.device,)
 
-        self.skeleton_tree = temp_ml.skeleton_tree
+        self.skeleton_tree = SkeletonTree.from_mjcf('phys_anim/data/assets/mjcf/amp_humanoid_sword_shield.xml')
 
-        state = temp_ml.state
+        state = temp_ml.get_motion_state(0,torch.zeros(1,device=self.device))
+
 
         self.demo_dataset = {
             "root_pos": torch.zeros(self.dataset_len, state.root_pos.shape[1], device=self.device),
@@ -152,42 +204,51 @@ class IQL:
         filled = 0
         while filled < self.dataset_len:
             file_rand = random.choice(self.demo_dataset_files)
+            global_rot = torch.from_numpy(file_rand['global_rot'][:,0,...])
+            root_pos = torch.from_numpy(file_rand['root_pos'][:,0,...])
             sk_state = SkeletonState.from_rotation_and_root_translation(
-                self.skeleton_tree, file_rand['global_rot'], file_rand['root_pos'], is_local=False
+                self.skeleton_tree,
+                global_rot,
+                root_pos,
+                is_local=False
             )
             sk_motion = SkeletonMotion.from_skeleton_state(sk_state,30)
             dataset_end = np.clip(filled + len(sk_motion), 0,self.dataset_len)
             motion_end = np.clip(self.dataset_len - len(sk_motion), 0, len(sk_motion))
-            root_pos = sk_motion.root_translation[0:motion_end]
-            root_rot = sk_motion.global_root_rotation[0:motion_end]
-            root_vel = sk_motion.global_root_velocity[0:motion_end]
-            root_ang_vel = sk_motion.global_root_angular_velocity[0:motion_end]
+            root_pos = sk_motion.root_translation[0:motion_end].to(self.device)
+            root_rot = sk_motion.global_root_rotation[0:motion_end].to(self.device)
+            root_vel = sk_motion.global_root_velocity[0:motion_end].to(self.device)
+            root_ang_vel = sk_motion.global_root_angular_velocity[0:motion_end].to(self.device)
             dof_pos = _local_rotation_to_dof(dof_body_ids=self.dof_body_ids,
                                              dof_offsets=self.dof_offsets,
                                              num_dof=self.num_act,
                                              device=self.device,
                                              local_rot=sk_motion.local_rotation,
-                                             joint_3d_format='exp_map',)
-            dof_vel = sk_motion.dof_vel[0:motion_end]
-            key_body_pos = sk_motion.global_translation[0:motion_end, self.key_body_ids.unsqueeze(0)]
-            actions = file_rand['actions'][0:motion_end]
-            self.dataset['root_pos'][filled:dataset_end] = root_pos
-            self.dataset['root_rot'][filled:dataset_end] = root_rot
-            self.dataset['root_vel'][filled:dataset_end] = root_vel
-            self.dataset['root_ang_vel'][filled:dataset_end] = root_ang_vel
-            self.dataset['dof_pos'][filled:dataset_end] = dof_pos
-            self.dataset['dof_vel'][filled:dataset_end] = dof_vel
-            self.dataset['key_body_pos'] = key_body_pos
-            self.dataset['disc_obs'] = build_disc_action_observations(
-                                            root_pos,
-                                            root_rot,
-                                            root_vel,
-                                            root_ang_vel,
-                                            dof_pos,
-                                            dof_vel,
-                                            key_body_pos,
+                                             joint_3d_format='exp_map',).to(self.device)
+            dof_vel = _compute_motion_dof_vels(dof_body_ids=self.dof_body_ids,
+                                             dof_offsets=self.dof_offsets,
+                                             num_dof=self.num_act,
+                                             device=self.device,
+                                             motion=sk_motion).to(self.device)
+            key_body_pos = sk_motion.global_translation[0:motion_end, self.key_body_ids.unsqueeze(0)].to(self.device)
+            actions = torch.from_numpy(file_rand['actions'][0:motion_end,0,...]).to(self.device)
+            self.demo_dataset['root_pos'][filled:dataset_end] = root_pos
+            self.demo_dataset['root_rot'][filled:dataset_end] = root_rot
+            self.demo_dataset['root_vel'][filled:dataset_end] = root_vel
+            self.demo_dataset['root_ang_vel'][filled:dataset_end] = root_ang_vel
+            self.demo_dataset['dof_pos'][filled:dataset_end] = dof_pos
+            self.demo_dataset['dof_vel'][filled:dataset_end] = dof_vel
+            self.demo_dataset['key_body_pos'] = key_body_pos
+            self.demo_dataset['disc_obs'] = build_disc_action_observations(
+                                            root_pos.unsqueeze(1),
+                                            root_rot.unsqueeze(1),
+                                            root_vel.unsqueeze(1),
+                                            root_ang_vel.unsqueeze(1),
+                                            dof_pos.unsqueeze(1),
+                                            dof_vel.unsqueeze(1),
+                                            key_body_pos.unsqueeze(1),
                                             torch.zeros(1, device=self.device),
-                                            actions,
+                                            actions.unsqueeze(1),
                                             self.all_config.env.config.humanoid_obs.local_root_obs,
                                             self.all_config.env.config.humanoid_obs.root_height_obs,
                                             self.all_config.robot.dof_obs_size,
@@ -195,7 +256,7 @@ class IQL:
                                             False,
                                             self.w_last,
                                         )
-            self.dataset['human_obs'] = compute_humanoid_observations_max(
+            self.demo_dataset['human_obs'] = compute_humanoid_observations_max(
                                             sk_motion.global_translation,
                                             sk_motion.global_rotation,
                                             sk_motion.global_velocity,

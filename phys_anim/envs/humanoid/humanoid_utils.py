@@ -441,7 +441,7 @@ def build_disc_observations(
 
         return obs, obs_dict
 
-@torch.jit.script
+#@torch.jit.script
 def build_disc_action_observations(
     root_pos: Tensor,
     root_rot: Tensor,
