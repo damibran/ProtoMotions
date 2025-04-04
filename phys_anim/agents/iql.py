@@ -34,7 +34,7 @@ def soft_update_from_to(source, target, tau):
         )
 
 # jp hack
-# get rid of this ASAP, need a proper way of projecting from max coords to reduced coords
+# get rid of this ASAP, need a proper way of projecting from max coords to reduced coord
 def _local_rotation_to_dof(dof_body_ids,dof_offsets,num_dof, device, local_rot, joint_3d_format):
     body_ids = dof_body_ids
     dof_offsets = dof_offsets
@@ -109,6 +109,7 @@ def _local_rotation_to_dof_vel(dof_body_ids,dof_offsets, num_dof, device, local_
 
     return dof_vel
 
+"""
 def _compute_motion_dof_vels(dof_body_ids,dof_offsets, num_dof, device,motion: SkeletonMotion):
     num_frames = motion.global_translation.shape[0]
     dt = 1.0 / motion.fps
@@ -123,7 +124,8 @@ def _compute_motion_dof_vels(dof_body_ids,dof_offsets, num_dof, device,motion: S
     dof_vels.append(dof_vels[-1])
     dof_vels = torch.stack(dof_vels, dim=0)
 
-    return dof_vels
+    return 
+"""
 
 # def list_roll(inlist, n):
 #    for i in range(n):
@@ -196,9 +198,8 @@ class IQL:
             "dof_pos": torch.zeros(self.dataset_len, state.dof_pos.shape[1], device=self.device),
             "dof_vel": torch.zeros(self.dataset_len, state.dof_vel.shape[1], device=self.device),
             "key_body_pos": torch.zeros(self.dataset_len, state.key_body_pos.shape[1], state.key_body_pos.shape[2], device=self.device),
-            "DiscrimObs": torch.zeros(self.dataset_len, self.disc_obs_size, device=self.device),
-            "Actions": torch.zeros(self.dataset_len, self.num_act, device=self.device),
-            "HumanoidObservations": torch.zeros(self.dataset_len, self.num_obs, device=self.device)
+            "disc_obs": torch.zeros(self.dataset_len, self.disc_obs_size, device=self.device),
+            "actions": torch.zeros(self.dataset_len, self.num_act, device=self.device),
         }
         self.dataset = {}
 
@@ -231,11 +232,12 @@ class IQL:
                                              device=self.device,
                                              local_rot=sk_motion.local_rotation,
                                              joint_3d_format='exp_map',).to(self.device)
-            dof_vel = _compute_motion_dof_vels(dof_body_ids=self.dof_body_ids,
+            dof_vel = torch.zeros((motion_end, self.num_act),device=self.device)
+            '''_compute_motion_dof_vels(dof_body_ids=self.dof_body_ids,
                                              dof_offsets=self.dof_offsets,
                                              num_dof=self.num_act,
                                              device=self.device,
-                                             motion=sk_motion).to(self.device)
+                                             motion=sk_motion).to(self.device)'''
             key_body_pos = sk_motion.global_translation[0:motion_end, self.key_body_ids].to(self.device)
             actions = torch.from_numpy(file_rand['actions'][0:motion_end,0,...]).to(self.device)
             self.demo_dataset['root_pos'][filled:dataset_end] = root_pos
@@ -245,7 +247,7 @@ class IQL:
             self.demo_dataset['dof_pos'][filled:dataset_end] = dof_pos
             self.demo_dataset['dof_vel'][filled:dataset_end] = dof_vel
             self.demo_dataset['key_body_pos'] = key_body_pos
-            self.demo_dataset['disc_obs'] = build_disc_action_observations(
+            self.demo_dataset['disc_obs'] = self.make_disc_with_hist_obs(build_disc_action_observations(
                                             root_pos,
                                             root_rot,
                                             root_vel,
@@ -261,17 +263,8 @@ class IQL:
                                             self.dof_offsets,
                                             False,
                                             self.w_last,
-                                        )
-            self.demo_dataset['human_obs'] = compute_humanoid_observations_max(
-                                            sk_motion.global_translation.to(self.device),
-                                            sk_motion.global_rotation.to(self.device),
-                                            sk_motion.global_velocity.to(self.device),
-                                            sk_motion.global_angular_velocity.to(self.device),
-                                            torch.zeros(1, device=self.device),
-                                            self.all_config.env.config.humanoid_obs.local_root_obs,
-                                            self.all_config.env.config.humanoid_obs.root_height_obs,
-                                            self.w_last,
-                                        )
+                                        ))
+            self.dataset['actions'] = actions
             filled += dataset_end
 
         file_rand = random.choice(self.dataset_files)
@@ -295,11 +288,12 @@ class IQL:
                                          device=self.device,
                                          local_rot=sk_motion.local_rotation,
                                          joint_3d_format='exp_map', ).to(self.device)
-        dof_vel = _compute_motion_dof_vels(dof_body_ids=self.dof_body_ids,
+        dof_vel = torch.zeros((root_vel.shape[0], self.num_act),device=self.device)
+        '''_compute_motion_dof_vels(dof_body_ids=self.dof_body_ids,
                                            dof_offsets=self.dof_offsets,
                                            num_dof=self.num_act,
                                            device=self.device,
-                                           motion=sk_motion).to(self.device)
+                                           motion=sk_motion).to(self.device)'''
         key_body_pos = sk_motion.global_translation[:, self.key_body_ids].to(self.device)
         actions = torch.from_numpy(file_rand['actions'][:, env_rand, ...]).to(self.device)
         self.dataset['root_pos'] = root_pos
@@ -309,7 +303,7 @@ class IQL:
         self.dataset['dof_pos'] = dof_pos
         self.dataset['dof_vel'] = dof_vel
         self.dataset['key_body_pos'] = key_body_pos
-        self.dataset['disc_obs'] = build_disc_action_observations(
+        self.dataset['disc_obs'] = self.make_disc_with_hist_obs(build_disc_action_observations(
                                             root_pos,
                                             root_rot,
                                             root_vel,
@@ -325,7 +319,7 @@ class IQL:
                                             self.dof_offsets,
                                             False,
                                             self.w_last,
-                                        )
+                                        ))
         self.dataset['human_obs'] = compute_humanoid_observations_max(
                                             sk_motion.global_translation.to(self.device),
                                             sk_motion.global_rotation.to(self.device),
@@ -424,9 +418,9 @@ class IQL:
         self.target_update_period = 1
         self.disc_update_period = 1
 
-        #state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_6/last.ckpt", map_location=self.device)
-        #self.actor.load_state_dict(state_dict["actor"])
-        #self.save(name="last_a.ckpt")
+        state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_2/last.ckpt", map_location=self.device)
+        self.actor.load_state_dict(state_dict["actor"])
+        self.save(name="last_a.ckpt")
 
     def fit(self):
 
@@ -484,7 +478,6 @@ class IQL:
                         "dof_vel": self.demo_dataset["dof_vel"][0:self.config.batch_size],
                         "key_body_pos": self.demo_dataset["key_body_pos"][0:self.config.batch_size],
                         "disc_obs": self.demo_dataset["disc_obs"][0:self.config.batch_size],
-                        "human_obs": self.demo_dataset["human_obs"][0:self.config.batch_size],
                         "actions": self.demo_dataset["actions"][0:self.config.batch_size]
                     }
 
@@ -532,7 +525,7 @@ class IQL:
                     """
                     self.actor.training = True
                     actor_out = self.actor.training_forward(
-                        {"obs": batch["obs"],
+                        {"obs": batch["human_obs"],
                          "actions": batch["actions"],
                          "latents": batch["latents"]})
 
@@ -582,7 +575,7 @@ class IQL:
                                                                                               device=self.device))
 
                     disc_loss, disc_log_dict = self.encoder_step(
-                        {"AgentDiscObs": agent_disc_obs, "DemoDiscObs": demo_batch["DiscrimObs"],
+                        {"AgentDiscObs": agent_disc_obs, "DemoDiscObs": demo_batch["disc_obs"],
                          "latents": batch["latents"]})
 
                     """
@@ -655,9 +648,7 @@ class IQL:
                 "actor_loss/div": a_loss_tensor_div.mean(),
                 "actor_loss/total": a_loss_tensor_total.mean(),
             })
-            self.log_dict.update({
-                disc_log_dict
-            })
+            self.log_dict.update(disc_log_dict)
 
             self.fabric.log_dict(self.log_dict, self.current_epoch)
 
@@ -1026,7 +1017,7 @@ class IQL:
 
         return torch.cat(total_error, dim=-1)
 
-    def make_disc_with_hist_obs(self, dics_obs:torch.Tensor, reset:torch.Tensor):
+    def make_disc_with_hist_obs(self, dics_obs:torch.Tensor, reset:torch.Tensor = None):
         disc_steps_len = dics_obs.shape[0]
         hist_steps = self.all_config.env.config.discriminator_obs_historical_steps
         obs_size = self.discriminator_obs_size_per_step
@@ -1052,9 +1043,9 @@ class IQL:
     def get_state_dict(self, state_dict):
         extra_state_dict = {
             "actor": self.actor.state_dict(),
-            "critic": self.critic_s.state_dict(),
+            "critic": self.target_qf1.state_dict(),
             "actor_optimizer": self.actor_optimizer.state_dict(),
-            "critic_optimizer": self.critic_s_optimizer.state_dict(),
+            "critic_optimizer": self.qf1_optimizer.state_dict(),
             "epoch": self.current_epoch,
             "episode_reward_meter": None,
             "episode_length_meter": None,
