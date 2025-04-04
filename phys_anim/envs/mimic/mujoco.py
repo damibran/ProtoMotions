@@ -10,6 +10,7 @@ from isaac_utils import torch_utils, rotations
 from torch import Tensor
 from typing import Dict, List
 import os
+import threading
 
 rot_conv_isaac_to_mjc = np.array([3, 0, 1, 2])
 rot_conv_mjc_to_isaac = np.array([1,2,3,0])
@@ -22,14 +23,15 @@ class MjcMimic(BaseInterface):
         self.mjc_datas = []
 
         for _ in range(self.config.num_envs):
-            mjc_model = mujoco.MjModel.from_xml_path(os.getcwd()+'/phys_anim/data/assets/mjcf/mjc_amp_humanoid_sword_shield.xml')
+            mjc_model = mujoco.MjModel.from_xml_path(
+                os.getcwd() + '/phys_anim/data/assets/mjcf/mjc_amp_humanoid_sword_shield.xml')
             self.mjc_models.append(mjc_model)
             self.mjc_datas.append(mujoco.MjData(mjc_model))
 
         self.dt = self.mjc_models[0].opt.timestep
 
-        min = 100.
-        max = -100.
+        min_val = 100.
+        max_val = -100.
         # Iterate through all actuators
         for mjc_model in self.mjc_models:
             for i in range(mjc_model.nu):  # Number of actuators
@@ -45,19 +47,14 @@ class MjcMimic(BaseInterface):
                     if mjc_model.jnt_limited[joint_id]:
                         mjc_model.actuator_ctrlrange[i, 0] = mjc_model.jnt_range[joint_id, 0]  # Lower limit
                         mjc_model.actuator_ctrlrange[i, 1] = mjc_model.jnt_range[joint_id, 1]  # Upper limit
-                        if mjc_model.actuator_ctrlrange[i, 0] < min:
-                            min = mjc_model.actuator_ctrlrange[i, 0]
-                        if mjc_model.jnt_range[joint_id, 1] > max:
-                            max = mjc_model.jnt_range[joint_id, 1]
+                        if mjc_model.actuator_ctrlrange[i, 0] < min_val:
+                            min_val = mjc_model.actuator_ctrlrange[i, 0]
+                        if mjc_model.jnt_range[joint_id, 1] > max_val:
+                            max_val = mjc_model.jnt_range[joint_id, 1]
 
-        print(f'actuator range min: {min}, max: {max}')
+        print(f'actuator range min: {min_val}, max: {max_val}')
 
         self.body_num = 17
-        #self.marker_ids = []
-        #for i in range(1, self.body_num + 1):
-        #    self.marker_ids.append(mujoco.mj_name2id(self.mjc_model, mujoco.mjtObj.mjOBJ_SITE, f"marker_{i}"))
-        #self.marker_ids = np.array(self.marker_ids)
-
         self.setup_character_props()
 
         self.key_body_ids = torch.tensor(
@@ -92,55 +89,81 @@ class MjcMimic(BaseInterface):
         )
 
         self.obs_buf = torch.zeros((self.config.num_envs, self.config.robot.self_obs_size), device=self.device)
-        self.mimic_target_poses = torch.zeros((self.config.num_envs, self.config.mimic_target_pose.num_future_steps * self.config.mimic_target_pose.num_obs_per_target_pose), device=self.device)
+        self.mimic_target_poses = torch.zeros((self.config.num_envs,
+                                               self.config.mimic_target_pose.num_future_steps * self.config.mimic_target_pose.num_obs_per_target_pose),
+                                              device=self.device)
         self.rew_buf = torch.zeros(self.config.num_envs, device=self.device)
         self.reset_buf = torch.zeros(self.config.num_envs, device=self.device)
         self.last_scaled_rewards: List[Dict[str, torch.Tensor]] = [{} for _ in range(self.config.num_envs)]
         self.last_other_rewards: List[Dict[str, torch.Tensor]] = [{} for _ in range(self.config.num_envs)]
 
-    def step(self, actions:torch.Tensor):
+        # Threading-related attributes
+        self.threads = []
+
+    def _thread_step(self, env_id, actions):
+        pd_tar = self.action_to_pd_targets(actions[env_id])
+
+        self.mjc_datas[env_id].ctrl = pd_tar.squeeze(0).cpu().detach().numpy()
+
+        for i in range(10):
+            mujoco.mj_step(self.mjc_models[env_id], self.mjc_datas[env_id])
+
+        self.motion_times[env_id] += 1. / 30.
+        self.obs_buf[env_id], self.mimic_target_poses[env_id] = self._compute_obs(env_id)
+        self.rew_buf[env_id] = self._compute_reward(env_id)
+        self.reset_buf[env_id] = self.motion_times[env_id] > self.motion_lib.get_motion_length(0) or \
+                                 self.last_other_rewards[env_id][
+                                     "max_joint_err"] > 0.25
+
+    def step(self, actions: torch.Tensor):
         """
         return:: obs, rewards, dones, extras
         """
+        self.threads = []
 
+        # Create and start threads
         for env_id in range(self.config.num_envs):
-            pd_tar = self.action_to_pd_targets(actions[env_id])
+            thread = threading.Thread(target=self._thread_step, args=(env_id, actions))
+            self.threads.append(thread)
+            thread.start()
 
-            self.mjc_datas[env_id].ctrl = pd_tar.squeeze(0).cpu().detach().numpy()
+        # Wait for all threads to complete
+        for thread in self.threads:
+            thread.join()
 
-            for i in range(10):
-                mujoco.mj_step(self.mjc_models[env_id], self.mjc_datas[env_id])
+        return self.obs_buf, self.rew_buf, self.reset_buf, {"to_log": {}, "terminate": self.reset_buf}
 
-            self.motion_times[env_id] += 1. / 30.
-
-            self.obs_buf[env_id], self.mimic_target_poses[env_id] = self._compute_obs(env_id)
-            self.rew_buf[env_id] = self._compute_reward(env_id)
-            self.reset_buf[env_id] = self.motion_times[env_id] > self.motion_lib.get_motion_length(0) or self.last_other_rewards[env_id][
-                "max_joint_err"] > 0.25
-
-        #todo: add to log, terminate?
-        return self.obs_buf, self.rew_buf, self.reset_buf, {"to_log":{},"terminate":self.reset_buf}
-
-    def action_to_pd_targets(self, action):
-        pd_tar = self._pd_action_offset + self._pd_action_scale * action
-        return pd_tar
+    def _thread_reset(self, env_id):
+        mujoco.mj_resetData(self.mjc_models[env_id], self.mjc_datas[env_id])
+        self.motion_times[env_id] = torch.zeros(1, device=self.device)
+        self.prev_time = 0
+        self._reset_humanoid(env_id)
+        self.obs_buf[env_id], self.mimic_target_poses[env_id] = self._compute_obs(env_id)
 
     def reset(self, env_ids=None):
         """
         return:: new obs
         """
-
         if env_ids is None:
             env_ids = torch.arange(self.config.num_envs)
 
+        self.threads = []
+
+        # Create and start threads
         for env_id in env_ids:
-            mujoco.mj_resetData(self.mjc_models[env_id], self.mjc_datas[env_id])
-            self.motion_times[env_id] = torch.zeros(1, device=self.device)
-            self.prev_time = 0
-            self._reset_humanoid(env_id)
-            self.obs_buf[env_id], self.mimic_target_poses[env_id] = self._compute_obs(env_id)
+            thread = threading.Thread(target=self._thread_reset, args=(env_id,))
+            self.threads.append(thread)
+            thread.start()
+
+        # Wait for all threads to complete
+        for thread in self.threads:
+            thread.join()
 
         return self.obs_buf
+
+    def action_to_pd_targets(self, action):
+        pd_tar = self._pd_action_offset + self._pd_action_scale * action
+        return pd_tar
 
     def _reset_humanoid(self, env_id: int):
         ref_state = self.motion_lib.get_mimic_motion_state(
