@@ -44,7 +44,6 @@ algo:
             terrain_model: ${algo.config.models.terrain_models.mlp}
             extra_inputs:
               mimic_target_poses: ${algo.config.models.mimic_target_pose_model}
-            latent_dim: ${algo.config.infomax_parameters.latent_dim}
         init_logstd: -2.9
         learnable_sigma: false
         sigma_schedule: null
@@ -69,7 +68,7 @@ algo:
       _recursive_: False
       config:
         initializer: default
-        units: [ 1024, 512 ]
+        units: [1024, 1024, 1024, 1024, 1024]
         activation: relu
         normalize_obs: ${algo.config.normalize_obs}
         obs_clamp_value: ${algo.config.obs_clamp_value}
@@ -97,43 +96,19 @@ algo:
     actor_lr_scheduler: null
     critic_lr_scheduler: null
 
-    # ASE parameters
-    infomax_parameters:
-      latent_dim: [ 64 ]
-      latent_types: [ hypersphere ]
-
-      mi_reward_w: [ 0.5 ]
-      mi_hypersphere_reward_shift: True
-
-      mi_enc_weight_decay: 0
-      mi_enc_grad_penalty: 0
-
-      diversity_tar: 1.
-      diversity_bonus: 0.01
-
-      random_latents: True
-      latent_steps_min: 1
-      latent_steps_max: 150
-
     #IQL parameters
-    expectile: 0.8
+    expectile: 0.7
     alpha: 0.5
     batch_size: 16384
     max_epochs: 10000
     normalize_obs: True
     obs_clamp_value: null
-    discriminator_reward_w: 2.0
-    discriminator_grad_penalty: 5
-    discriminator_weight_decay: 0.0001
-    discriminator_logit_weight_decay: 0.01
     discount: 0.99
     beta: 3 # aka temperatue
 
     eval_callbacks: null
 
     extra_inputs: null
-
-    num_obs_enc_steps: 60
 
 env:
   config:
@@ -152,10 +127,6 @@ env:
       num_obs_per_target_pose: ${.base_num_obs_per_target_pose}
       base_num_obs_per_target_pose: ${eval:${.num_obs_per_joint}*${robot.num_bodies}}
       num_obs_per_joint: 18
-
-    discriminator_obs_historical_steps: 10
-    disable_discriminator: False
-    discriminator_obs_size_per_step: ${eval:13+${robot.dof_obs_size}+${robot.number_of_actions}+3*${robot.num_key_bodies}}
 
     ## Motion-related params
     ### Respawn related params

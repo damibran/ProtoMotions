@@ -9,26 +9,13 @@ from torch.cuda import device
 
 from isaac_utils import torch_utils
 from lightning.fabric import Fabric
-from utils.motion_lib import MotionLib
-from utils.StateActionLib import StateActionLib, MotionStateAction
 from phys_anim.agents.models.actor import PPO_Actor
 from hydra.utils import instantiate
 from phys_anim.agents.models.common import NormObsBase
 from phys_anim.envs.env_utils.general import StepTracker
-from phys_anim.agents.models.infomax import JointDiscWithMutualInformationEncMLP
-from phys_anim.agents.models.mlp import MultiHeadedMLP, MLP_WithNorm
-from phys_anim.agents.models.discriminator import JointDiscMLP
-from phys_anim.envs.humanoid.humanoid_utils import build_disc_observations, build_disc_action_observations, \
-    compute_humanoid_observations_max
+
 import math
-import numpy as np
 import h5py
-
-
-
-# def list_roll(inlist, n):
-#    for i in range(n):
-#        inlist.append(inlist.pop(0))
 
 def soft_update_from_to(source, target, tau):
     for target_param, param in zip(target.parameters(), source.parameters()):
@@ -52,21 +39,10 @@ class IQL_Mimic:
 
         self.log_dict = {}
 
-        self.discriminator_obs_size_per_step = (
-            self.all_config.env.config.discriminator_obs_size_per_step
-        )
-
         self.current_epoch = 0
 
         self.expectile = self.config.expectile
         self.alpha = self.config.alpha
-
-        self.latent_reset_steps = StepTracker(
-            1,
-            min_steps=self.config.infomax_parameters.latent_steps_min,
-            max_steps=self.config.infomax_parameters.latent_steps_max,
-            device=self.device,
-        )
 
         self.setup_character_props()
 
@@ -271,10 +247,10 @@ class IQL_Mimic:
                     """
                     if self._n_train_steps_total % self.target_update_period == 0:
                         soft_update_from_to(
-                            self.qf1, self.target_qf1, self.soft_target_tau
+                            self.qf1, self.target_qf1, self.alpha
                         )
                         soft_update_from_to(
-                            self.qf2, self.target_qf2, self.soft_target_tau
+                            self.qf2, self.target_qf2, self.alpha
                         )
 
                     self._n_train_steps_total += 1
@@ -327,8 +303,14 @@ class IQL_Mimic:
         extra_state_dict = {
             "actor": self.actor.state_dict(),
             "critic": self.vf.state_dict(),
+            "q1": self.qf1.state_dict(),
+            "q2": self.qf2.state_dict(),
+            "q1_target": self.target_qf1.state_dict(),
+            "q2_target": self.target_qf2.state_dict(),
             "actor_optimizer": self.actor_optimizer.state_dict(),
             "critic_optimizer": self.vf_optimizer.state_dict(),
+            "q1_optimizer": self.qf1_optimizer.state_dict(),
+            "q2_optimizer": self.qf2_optimizer.state_dict(),
             "epoch": self.current_epoch,
             "episode_reward_meter": None,
             "episode_length_meter": None,
