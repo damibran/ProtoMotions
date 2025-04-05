@@ -109,7 +109,7 @@ def _local_rotation_to_dof_vel(dof_body_ids,dof_offsets, num_dof, device, local_
 
     return dof_vel
 
-"""
+
 def _compute_motion_dof_vels(dof_body_ids,dof_offsets, num_dof, device,motion: SkeletonMotion):
     num_frames = motion.global_translation.shape[0]
     dt = 1.0 / motion.fps
@@ -124,8 +124,8 @@ def _compute_motion_dof_vels(dof_body_ids,dof_offsets, num_dof, device,motion: S
     dof_vels.append(dof_vels[-1])
     dof_vels = torch.stack(dof_vels, dim=0)
 
-    return 
-"""
+    return dof_vels
+
 
 # def list_roll(inlist, n):
 #    for i in range(n):
@@ -178,26 +178,9 @@ class IQL:
 
         self.dataset_len = self.dataset_files[0]["dones"].shape[0]
 
-        temp_ml = MotionLib(
-            motion_file= 'phys_anim/data/motions/sword_shield/RL_Avatar_Atk_2xCombo01_Motion.npy',
-            dof_body_ids=self.dof_body_ids,
-            dof_offsets=self.dof_offsets,
-            key_body_ids=self.key_body_ids,
-            device=self.device,)
-
         self.skeleton_tree = SkeletonTree.from_mjcf('phys_anim/data/assets/mjcf/amp_humanoid_sword_shield.xml')
 
-        state = temp_ml.get_motion_state(0,torch.zeros(1,device=self.device))
-
-
         self.demo_dataset = {
-            "root_pos": torch.zeros(self.dataset_len, state.root_pos.shape[1], device=self.device),
-            "root_rot": torch.zeros(self.dataset_len, state.root_rot.shape[1], device=self.device),
-            "root_vel": torch.zeros(self.dataset_len, state.root_vel.shape[1], device=self.device),
-            "root_ang_vel": torch.zeros(self.dataset_len, state.root_ang_vel.shape[1], device=self.device),
-            "dof_pos": torch.zeros(self.dataset_len, state.dof_pos.shape[1], device=self.device),
-            "dof_vel": torch.zeros(self.dataset_len, state.dof_vel.shape[1], device=self.device),
-            "key_body_pos": torch.zeros(self.dataset_len, state.key_body_pos.shape[1], state.key_body_pos.shape[2], device=self.device),
             "disc_obs": torch.zeros(self.dataset_len, self.disc_obs_size, device=self.device),
             "actions": torch.zeros(self.dataset_len, self.num_act, device=self.device),
         }
@@ -240,13 +223,6 @@ class IQL:
                                              motion=sk_motion).to(self.device)'''
             key_body_pos = sk_motion.global_translation[0:motion_end, self.key_body_ids].to(self.device)
             actions = torch.from_numpy(file_rand['actions'][0:motion_end,0,...]).to(self.device)
-            self.demo_dataset['root_pos'][filled:dataset_end] = root_pos
-            self.demo_dataset['root_rot'][filled:dataset_end] = root_rot
-            self.demo_dataset['root_vel'][filled:dataset_end] = root_vel
-            self.demo_dataset['root_ang_vel'][filled:dataset_end] = root_ang_vel
-            self.demo_dataset['dof_pos'][filled:dataset_end] = dof_pos
-            self.demo_dataset['dof_vel'][filled:dataset_end] = dof_vel
-            self.demo_dataset['key_body_pos'] = key_body_pos
             self.demo_dataset['disc_obs'] = self.make_disc_with_hist_obs(build_disc_action_observations(
                                             root_pos,
                                             root_rot,
@@ -418,9 +394,9 @@ class IQL:
         self.target_update_period = 1
         self.disc_update_period = 1
 
-        state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_2/last.ckpt", map_location=self.device)
-        self.actor.load_state_dict(state_dict["actor"])
-        self.save(name="last_a.ckpt")
+        #state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_2/last.ckpt", map_location=self.device)
+        #self.actor.load_state_dict(state_dict["actor"])
+        #self.save(name="last_a.ckpt")
 
     def fit(self):
 
