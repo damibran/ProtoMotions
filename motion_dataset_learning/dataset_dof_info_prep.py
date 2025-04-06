@@ -118,7 +118,7 @@ motion_names = [
     'RL_Avatar_TurnRight180_Motion',
 ]
 
-root_dir = 'output/recordings/mimic_eval'
+root_dir = 'output/recordings/mimic_train'
 
 dfs_dof_body_ids = [ 1, 2, 3, 4, 5, 7, 8, 11, 12, 13, 14, 15, 16 ] #all_config.robot.dfs_dof_body_ids
 dfs_dof_names = ['abdomen_x', 'abdomen_y', 'abdomen_z', 'neck_x', 'neck_y', 'neck_z',
@@ -141,19 +141,22 @@ dof_offsets.append(len(dfs_dof_names))
 for motion_name in motion_names:
     file_path = os.getcwd() + '/' + root_dir + '/' + motion_name + '/' + 'dataset.hdf5'
     file = h5py.File(file_path, 'r+')
-    global_rot = torch.from_numpy(file['global_rot'][:, 0, ...])
-    root_pos = torch.from_numpy(file['root_pos'][:, 0, ...])
-    sk_state = SkeletonState.from_rotation_and_root_translation(
-        skeleton_tree,
-        global_rot,
-        root_pos,
-        is_local=False
-    )
-    sk_motion = SkeletonMotion.from_skeleton_state(sk_state, 30)
-    dof_vel = _compute_motion_dof_vels(dof_body_ids=dfs_dof_body_ids,
-                                     dof_offsets=dof_offsets,
-                                     num_dof=num_act,
-                                     device='cpu',
-                                     motion=sk_motion)
-    file['dof_vel'] = dof_vel
+    file.create_dataset('dof_vel',
+                        (file['global_rot'].shape[0],file['global_rot'].shape[1], num_act))
+    for env_id in range(file['global_rot'].shape[1]):
+        global_rot = torch.from_numpy(file['global_rot'][:, env_id, ...])
+        root_pos = torch.from_numpy(file['root_pos'][:, env_id, ...])
+        sk_state = SkeletonState.from_rotation_and_root_translation(
+            skeleton_tree,
+            global_rot,
+            root_pos,
+            is_local=False
+        )
+        sk_motion = SkeletonMotion.from_skeleton_state(sk_state, 30)
+        dof_vel = _compute_motion_dof_vels(dof_body_ids=dfs_dof_body_ids,
+                                         dof_offsets=dof_offsets,
+                                         num_dof=num_act,
+                                         device='cpu',
+                                         motion=sk_motion)
+        file['dof_vel'][:, env_id] = dof_vel
     file.close()

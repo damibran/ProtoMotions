@@ -98,8 +98,8 @@ algo:
 
     #IQL parameters
     expectile: 0.7
-    alpha: 0.5
-    batch_size: 16384
+    alpha: 0.005
+    batch_size: 256
     max_epochs: 10000
     normalize_obs: True
     obs_clamp_value: null

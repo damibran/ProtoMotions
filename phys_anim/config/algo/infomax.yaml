@@ -14,13 +14,9 @@ algo:
             latent_dim: ${algo.config.infomax_parameters.latent_dim}
             extra_inputs:
               latents:
-                _target_: phys_anim.agents.models.mlp.MLP_WithNorm
+                _target_: phys_anim.agents.models.common.Flatten
                 config:
-                  initializer: ${algo.config.actor.config.initializer}
-                  units: [512, 256]
-                  activation: ${algo.config.actor.config.activation}
-                  use_layer_norm: ${algo.config.actor.config.use_layer_norm}
-                  normalize_obs: ${algo.config.normalize_obs}
+                  normalize_obs: False
                   obs_clamp_value: ${algo.config.obs_clamp_value}
                 num_in: ${sum:${algo.config.infomax_parameters.latent_dim}}
                 num_out: ${.num_in}

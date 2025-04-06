@@ -215,12 +215,7 @@ class IQL:
                                              device=self.device,
                                              local_rot=sk_motion.local_rotation,
                                              joint_3d_format='exp_map',).to(self.device)
-            dof_vel = torch.zeros((motion_end, self.num_act),device=self.device)
-            '''_compute_motion_dof_vels(dof_body_ids=self.dof_body_ids,
-                                             dof_offsets=self.dof_offsets,
-                                             num_dof=self.num_act,
-                                             device=self.device,
-                                             motion=sk_motion).to(self.device)'''
+            dof_vel = torch.from_numpy(file_rand['dof_vel'][0:motion_end]).to(self.device)
             key_body_pos = sk_motion.global_translation[0:motion_end, self.key_body_ids].to(self.device)
             actions = torch.from_numpy(file_rand['actions'][0:motion_end,0,...]).to(self.device)
             self.demo_dataset['disc_obs'] = self.make_disc_with_hist_obs(build_disc_action_observations(
@@ -264,12 +259,7 @@ class IQL:
                                          device=self.device,
                                          local_rot=sk_motion.local_rotation,
                                          joint_3d_format='exp_map', ).to(self.device)
-        dof_vel = torch.zeros((root_vel.shape[0], self.num_act),device=self.device)
-        '''_compute_motion_dof_vels(dof_body_ids=self.dof_body_ids,
-                                           dof_offsets=self.dof_offsets,
-                                           num_dof=self.num_act,
-                                           device=self.device,
-                                           motion=sk_motion).to(self.device)'''
+        dof_vel = torch.from_numpy(file_rand['dof_vel'][:, env_rand, ...]).to(self.device)
         key_body_pos = sk_motion.global_translation[:, self.key_body_ids].to(self.device)
         actions = torch.from_numpy(file_rand['actions'][:, env_rand, ...]).to(self.device)
         self.dataset['root_pos'] = root_pos
@@ -394,7 +384,7 @@ class IQL:
         self.target_update_period = 1
         self.disc_update_period = 1
 
-        #state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_2/last.ckpt", map_location=self.device)
+        #state_dict = torch.load(Path.cwd() / "results/iql/lightning_logs/version_1/last.ckpt", map_location=self.device)
         #self.actor.load_state_dict(state_dict["actor"])
         #self.save(name="last_a.ckpt")
 
@@ -445,14 +435,6 @@ class IQL:
                     }
 
                     demo_batch = {
-                        "root_pos": self.demo_dataset["root_pos"][0:self.config.batch_size],
-                        "root_rot": self.demo_dataset["root_rot"][0:self.config.batch_size],
-                        "root_vel": self.demo_dataset["root_vel"][0:self.config.batch_size],
-                        "root_ang_vel": self.demo_dataset["root_ang_vel"][0:self.config.batch_size],
-                        "dof_pos": self.demo_dataset["dof_pos"][0:self.config.batch_size],
-                        "dof_vel": self.demo_dataset["dof_vel"][0:self.config.batch_size],
-                        "dof_vel": self.demo_dataset["dof_vel"][0:self.config.batch_size],
-                        "key_body_pos": self.demo_dataset["key_body_pos"][0:self.config.batch_size],
                         "disc_obs": self.demo_dataset["disc_obs"][0:self.config.batch_size],
                         "actions": self.demo_dataset["actions"][0:self.config.batch_size]
                     }

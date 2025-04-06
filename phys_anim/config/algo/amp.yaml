@@ -12,7 +12,7 @@ algo:
       _recursive_: False
       config:
         initializer: default
-        units: [1024, 512]
+        units: [1024, 1024, 512]
         discriminator_obs_historical_steps: ${env.config.discriminator_obs_historical_steps}
         activation: relu
         normalize_obs: ${algo.config.normalize_obs}

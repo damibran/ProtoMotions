@@ -44,7 +44,7 @@ algo:
           _recursive_: false
           config:
             initializer: ${algo.config.actor.config.initializer}
-            units: [1024,512]
+            units: [1024, 1024,512]
             activation: ${algo.config.actor.config.activation}
             normalize_obs: ${algo.config.normalize_obs}
             obs_clamp_value: ${algo.config.obs_clamp_value}
@@ -53,13 +53,9 @@ algo:
             extra_inputs:
               terrain: ${..terrain_model}
               latents:
-                _target_: phys_anim.agents.models.mlp.MLP_WithNorm
+                _target_: phys_anim.agents.models.common.Flatten
                 config:
-                  initializer: ${algo.config.actor.config.initializer}
-                  units: [512, 256]
-                  activation: ${algo.config.actor.config.activation}
-                  use_layer_norm: ${algo.config.actor.config.use_layer_norm}
-                  normalize_obs: ${algo.config.normalize_obs}
+                  normalize_obs: False
                   obs_clamp_value: ${algo.config.obs_clamp_value}
                 num_in: ${sum:${algo.config.infomax_parameters.latent_dim}}
                 num_out: ${.num_in}
@@ -75,7 +71,7 @@ algo:
       _recursive_: False
       config:
         initializer: default
-        units: [ 1024, 512 ]
+        units: [ 1024, 1024, 512 ]
         activation: relu
         normalize_obs: ${algo.config.normalize_obs}
         obs_clamp_value: ${algo.config.obs_clamp_value}
@@ -94,7 +90,7 @@ algo:
       _recursive_: False
       config:
         initializer: default
-        units: [ 1024, 512 ]
+        units: [ 1024, 1024, 1024, 1024, 512 ]
         activation: relu
         normalize_obs: ${algo.config.normalize_obs}
         obs_clamp_value: ${algo.config.obs_clamp_value}
@@ -120,7 +116,7 @@ algo:
       _recursive_: false
       config:
         initializer: default
-        units: [1024,512]
+        units: [1024, 1024,512]
         discriminator_obs_historical_steps: ${env.config.discriminator_obs_historical_steps}
         activation: relu
         normalize_obs: ${algo.config.normalize_obs}
@@ -160,7 +156,7 @@ algo:
 
     # ASE parameters
     infomax_parameters:
-      latent_dim: [ 64 ]
+      latent_dim: [ 8 ]
       latent_types: [ hypersphere ]
 
       mi_reward_w: [ 0.5 ]
@@ -178,8 +174,8 @@ algo:
 
     #IQL parameters
     expectile: 0.9
-    alpha: 0.5
-    batch_size: 1024
+    alpha: 0.1
+    batch_size: 16384
     max_epochs: 28000
     normalize_obs: True
     obs_clamp_value: null

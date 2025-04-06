@@ -18,7 +18,7 @@ algo:
           _recursive_: False
           config:
             initializer: ${algo.config.actor.config.initializer}
-            units: [1024, 512]
+            units: [1024, 1024, 512]
             activation: ${algo.config.actor.config.activation}
             normalize_obs: ${algo.config.normalize_obs}
             obs_clamp_value: ${algo.config.obs_clamp_value}
@@ -39,7 +39,7 @@ algo:
       _recursive_: False
       config:
         initializer: default
-        units: [1024, 512]
+        units: [1024, 1024, 512]
         activation: relu
         normalize_obs: ${algo.config.normalize_obs}
         obs_clamp_value: ${algo.config.obs_clamp_value}
