@@ -126,11 +126,6 @@ def _compute_motion_dof_vels(dof_body_ids,dof_offsets, num_dof, device,motion: S
 
     return dof_vels
 
-
-# def list_roll(inlist, n):
-#    for i in range(n):
-#        inlist.append(inlist.pop(0))
-
 class IQL:
 
     def __init__(self, fabric: Fabric, config):

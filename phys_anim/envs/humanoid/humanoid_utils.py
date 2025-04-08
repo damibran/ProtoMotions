@@ -356,8 +356,7 @@ def compute_humanoid_reset(
 
     return reset, terminated
 
-#todo:
-#@torch.jit.script
+@torch.jit.script
 def build_disc_observations(
     root_pos: Tensor,
     root_rot: Tensor,
