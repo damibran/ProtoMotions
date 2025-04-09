@@ -7,6 +7,7 @@ defaults:
   - /opt/mimic/mlp/target_pose_obs
   - /opt/mimic/global_tracking
   - /opt/mimic/early_termination_tracking_err
+  - /opt/record_motion
 
 #env:
 #  config:

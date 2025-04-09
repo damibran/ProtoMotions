@@ -36,6 +36,12 @@ class RL_EvalCallback(DeviceDtypeModuleMixin):
         self.training_loop = training_loop
         self.to(self.training_loop.device)
 
+    def on_pre_train_env_step(self, actor_state):
+        pass
+
+    def on_post_train_env_step(self, actor_state):
+        pass
+
     def on_pre_evaluate_policy(self):
         pass
 

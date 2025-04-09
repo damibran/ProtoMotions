@@ -6,13 +6,10 @@ algo:
       export_motion_cb:
         _target_: phys_anim.agents.callbacks.export_motion.ExportMotion
         config:
-          record_dir: output/recordings
-          store_poselib: True
-          index_offset: ${env.config.motion_index_offset}
+          record_dir: output/recordings/mimic_mjc_train
+          store_poselib: False
 
 env:
   config:
     export_motion: True
-    export_action: True
-    export_reset: True
-    env_num_to_export: 2
+    env_num_to_export: 12

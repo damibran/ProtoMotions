@@ -120,7 +120,6 @@ class MjcMimic(BaseInterface):
         return:: obs, rewards, dones, extras
         """
         self.threads = []
-
         # Create and start threads
         for env_id in range(self.config.num_envs):
             thread = threading.Thread(target=self._thread_step, args=(env_id, actions))

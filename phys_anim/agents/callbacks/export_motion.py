@@ -28,7 +28,7 @@
 
 from phys_anim.agents.callbacks.base_callback import RL_EvalCallback
 from phys_anim.agents.ppo import PPO
-from phys_anim.envs.humanoid.common import BaseHumanoid
+from phys_anim.envs.mimic.mujoco import MjcMimic, rot_conv_mjc_to_isaac
 
 import torch
 from pathlib import Path
@@ -41,24 +41,50 @@ import yaml
 import pickle
 from scipy.spatial.transform import Rotation as sRot
 
+from poselib.skeleton.skeleton3d import SkeletonMotion, SkeletonState, SkeletonTree
+
 
 class ExportMotion(RL_EvalCallback):
     training_loop: PPO
-    env: BaseHumanoid
+    env: MjcMimic
 
     def __init__(self, config, training_loop: PPO):
         super().__init__(config, training_loop)
         self.record_dir = Path(config.record_dir)
         self.record_dir.mkdir(exist_ok=True, parents=True)
+        self.trajectory_data=[]
+        self.record_period = 32 * 100
+        self.num_steps = 0
 
     def on_pre_evaluate_policy(self):
         # Doing this in two lines because of type annotation issues.
-        env: BaseHumanoid = self.training_loop.env
+        env: MjcMimic = self.training_loop.env
         self.env = env
+        self.num_envs = self.env.config.env_num_to_export
+        for env_id in range(self.num_envs):
+            self.trajectory_data.append(
+                {
+                    "root_pos":[],
+                    "global_rot":[],
+                    'actions':[]
+                }
+            )
+
+    def on_pre_train_env_step(self, actor_state):
+        self.on_pre_env_step(actor_state)
 
     def on_pre_eval_env_step(self, actor_state):
         actor_state["actions"] = actor_state["sampled_actions"]
         return actor_state
+
+    def on_pre_env_step(self, actor_state):
+        self.num_steps += 1
+        for env_id in range(self.num_envs):
+            self.trajectory_data[env_id]['actions'].append(actor_state["actions"][env_id].cpu().numpy())
+            self.trajectory_data[env_id]['root_pos'].append(self.env.mjc_datas[env_id].qpos[0:3].copy())
+            self.trajectory_data[env_id]['global_rot'].append(self.env.mjc_datas[env_id].xquat[1:].copy())
+        if self.num_steps % self.record_period == 0:
+            self.write_recordings()
 
     def on_post_evaluate_policy(self):
         self.write_recordings()
@@ -66,185 +92,34 @@ class ExportMotion(RL_EvalCallback):
     def write_recordings(self):
         fps = np.round(1.0 / self.env.dt)
         for idx in range(self.env.config.env_num_to_export):
-            trajectory_data = self.env.motion_recording
+            trajectory_data = self.trajectory_data[idx]
 
             save_dir = self.record_dir / f"{(idx):03d}"#+ self.config.index_offset
             save_dir.mkdir(exist_ok=True, parents=True)
 
-            motion_name = self.env.motion_lib.state.motion_files[0].rsplit('/')[-1].split('.')[0]
+            curr_root_pos = torch.stack(
+                [torch.from_numpy(root_pos) for root_pos in trajectory_data["root_pos"]]
+            )
+            curr_body_rot = torch.stack(
+                [torch.from_numpy(global_rot[:, rot_conv_mjc_to_isaac]) for global_rot in trajectory_data["global_rot"]]
+            )
 
-            if self.config.store_poselib:
-                skeleton_tree = self.env.motion_lib.state.motions[0].skeleton_tree
+            skeleton_tree = SkeletonTree.from_mjcf('phys_anim/data/assets/mjcf/mjc_amp_humanoid_sword_shield.xml')
 
-                curr_root_pos = torch.stack(
-                    [root_pos[idx] for root_pos in trajectory_data["root_pos"]]
+            sk_state = SkeletonState.from_rotation_and_root_translation(
+                skeleton_tree, curr_body_rot, curr_root_pos, is_local=False
+            )
+            sk_motion = SkeletonMotion.from_skeleton_state(sk_state, fps=30)
+
+            motion_name = self.env.motion_lib.state.motion_files[0].split('/')[-1].split('.')[0]
+
+            sk_motion.to_file(str(save_dir / f"{motion_name}.npy"))
+
+            if "actions" in trajectory_data:
+                actions = torch.stack(
+                    [torch.from_numpy(actions) for actions in trajectory_data["actions"]]
                 )
-                curr_body_rot = torch.stack(
-                    [global_rot[idx] for global_rot in trajectory_data["global_rot"]]
+                np.save(
+                    str(save_dir / f"{motion_name}_actions.npy"),
+                    actions.cpu().numpy()
                 )
-
-                sk_state = SkeletonState.from_rotation_and_root_translation(
-                    skeleton_tree, curr_body_rot, curr_root_pos, is_local=False
-                )
-                sk_motion = SkeletonMotion.from_skeleton_state(sk_state, fps=fps)
-
-                sk_motion.to_file(str(save_dir / f"{motion_name}.npy"))
-
-                #if "target_poses" in trajectory_data:
-                #    target_poses = torch.tensor(
-                #        np.stack(
-                #            [
-                #                target_pose[idx]
-                #                for target_pose in trajectory_data["target_poses"]
-                #            ]
-                #        )
-                #    )
-                #    np.save(
-                #        str(save_dir / f"target_poses_{idx}.npy"),
-                #        target_poses.cpu().numpy(),
-                #    )
-
-                if "actions" in trajectory_data:
-                    actions = torch.stack(
-                        [actions[idx] for actions in trajectory_data["actions"]]
-                    )
-                    np.save(
-                        str(save_dir / f"{motion_name}_actions.npy"),
-                        actions.cpu().numpy()
-                    )
-
-                if "reset" in trajectory_data:
-                    reset = torch.stack(
-                        [resets[idx] for resets in trajectory_data["reset"]]
-                    )
-
-                    np.save(
-                        str(save_dir / f"{motion_name}_reset.npy"),
-                        reset.cpu().numpy()
-                    )
-
-                if hasattr(self.env, "object_ids") and self.env.object_ids[idx] >= 0:
-                    object_id = self.env.object_ids[idx].item()
-                    object_category, object_name = self.env.spawned_object_names[
-                        object_id
-                    ].split("_")
-                    object_offset = self.env.object_offsets[object_category]
-                    object_pos = self.env.scene_position[object_id].clone()
-                    object_pos[0] += object_offset[0]
-                    object_pos[1] += object_offset[1]
-
-                    object_bbs = self.env.object_id_to_object_bounding_box[
-                        object_id
-                    ].clone()
-
-                    # Add the height offset for the bounding box to match in global coords
-                    object_center_xy = self.env.object_root_states[object_id, :2].view(
-                        1, 2
-                    )
-                    terrain_height_below_object = self.env.get_ground_heights(
-                        object_center_xy
-                    ).view(1)
-                    object_bbs[:, -1] += terrain_height_below_object
-
-                    object_info = {
-                        "object_pos": [
-                            object_pos[0].item(),
-                            object_pos[1].item(),
-                            object_pos[2].item(),
-                        ],
-                        "object_name": object_name,
-                        "object_bbox": object_bbs.cpu().tolist(),
-                    }
-                    with open(str(save_dir / f"object_info_{idx}.yaml"), "w") as file:
-                        yaml.dump(object_info, file)
-                    category_root = osp.join(
-                        self.env.config.object_asset_root, object_category
-                    )
-                    # copy urdf and obj files to new dir, using copy functions
-                    shutil.copyfile(
-                        str(osp.join(category_root, f"{object_name}.urdf")),
-                        str(save_dir / f"{object_name}.urdf"),
-                    )
-                    shutil.copyfile(
-                        str(osp.join(category_root, f"{object_name}.obj")),
-                        str(save_dir / f"{object_name}.obj"),
-                    )
-
-            else:
-                if "smpl" in self.env.config.robot.asset.robot_type:
-                    from smpl_sim.smpllib.smpl_joint_names import (
-                        SMPL_MUJOCO_NAMES,
-                        SMPL_BONE_ORDER_NAMES,
-                        SMPLH_BONE_ORDER_NAMES,
-                        SMPLH_MUJOCO_NAMES,
-                    )
-
-                    if self.env.config.robot.asset.robot_type in [
-                        "smpl_humanoid",
-                    ]:
-                        mujoco_joint_names = SMPL_MUJOCO_NAMES
-                        joint_names = SMPL_BONE_ORDER_NAMES
-                    elif self.env.config.robot.asset.robot_type in [
-                        "smplx_box_humanoid"
-                    ]:
-                        mujoco_joint_names = SMPLH_MUJOCO_NAMES
-                        joint_names = SMPLH_BONE_ORDER_NAMES
-                    else:
-                        raise NotImplementedError
-
-                    mujoco_2_smpl = [
-                        mujoco_joint_names.index(q)
-                        for q in joint_names
-                        if q in mujoco_joint_names
-                    ]
-                else:
-                    raise NotImplementedError
-
-                pre_rot = sRot.from_quat([0.5, 0.5, 0.5, 0.5])
-
-                body_quat = torch.stack(trajectory_data["rigid_body_rot"])[:, idx]
-                root_trans = torch.stack(trajectory_data["rigid_body_pos"])[
-                    :, idx, 0, :
-                ]
-
-                N = body_quat.shape[0]
-
-                skeleton_tree = self.env.motion_lib.state.motions[0].skeleton_tree
-
-                # offset = skeleton_tree.local_translation[0]
-                offset = root_trans[0].clone()
-                offset[2] = 0
-                root_trans_offset = root_trans - offset
-
-                pose_quat = (
-                    (sRot.from_quat(body_quat.reshape(-1, 4).numpy()) * pre_rot)
-                    .as_quat()
-                    .reshape(N, -1, 4)
-                )
-                new_sk_state = SkeletonState.from_rotation_and_root_translation(
-                    skeleton_tree,
-                    torch.from_numpy(pose_quat),
-                    root_trans.cpu(),
-                    is_local=False,
-                )
-                local_rot = new_sk_state.local_rotation
-                pose_aa = (
-                    sRot.from_quat(local_rot.reshape(-1, 4).numpy())
-                    .as_rotvec()
-                    .reshape(N, -1, 3)
-                )
-                pose_aa = pose_aa[:, mujoco_2_smpl, :].reshape(1, N, -1)
-
-                with open(save_dir / f"trajectory_pose_aa_{idx}.pkl", "wb") as f:
-                    pickle.dump(
-                        {
-                            "pose": pose_aa,
-                            "trans": root_trans_offset.unsqueeze(0).cpu().numpy(),
-                            "shape": np.zeros((N, 10)),
-                            "gender": "neutral",
-                        },
-                        f,
-                    )
-
-        for key in self.env.motion_recording.keys():
-            self.env.motion_recording[key] = []

@@ -482,6 +482,9 @@ class PPO:
             "values", actor_state["step"], values.view(-1)
         )
 
+        for c in self.eval_callbacks:
+            c.on_pre_train_env_step(actor_state)
+
         return actor_state
 
     def pre_eval_env_step(self, actor_state: dict):
@@ -519,6 +522,9 @@ class PPO:
             self.experience_buffer.update_data(k, actor_state["step"], actor_state[k])
 
         self.episode_env_tensors.add(actor_state["extras"]["to_log"])
+
+        for c in self.eval_callbacks:
+            c.on_post_train_env_step(actor_state)
 
         return actor_state
 
