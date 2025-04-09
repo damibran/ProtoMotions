@@ -113,7 +113,7 @@
             <body name="shield" pos="0 0.07 -0.12">
               <geom name="shield" type="cylinder" fromto="0 0 0 0 0.03 0" size="0.3" density="250"/>
             </body>
-            
+
             <body name="left_hand" pos="0 0 -0.258947">
               <geom name="left_hand" type="sphere" size=".04" density="1865"/>
               <site name="left_hand" class="touch" type="sphere" size=".041"/>
@@ -124,23 +124,23 @@
 
       <body name="right_thigh" pos="0 -0.084887 0">
         <site name="right_hip" class="force-torque"/>
-        <joint name="right_hip_x" axis="1 0 0" range="-60 15" stiffness="500" damping="50" armature=".02"/>
-        <joint name="right_hip_y" axis="0 1 0" range="-140 60" stiffness="500" damping="50" armature=".02"/>
-        <joint name="right_hip_z" axis="0 0 1" range="-60 35" stiffness="500" damping="50" armature=".02"/>
+        <joint name="right_hip_x" axis="1 0 0" range="-60 15" stiffness="500" damping="50" frictionloss="500" armature=".02"/>
+        <joint name="right_hip_y" axis="0 1 0" range="-140 60" stiffness="500" damping="50" frictionloss="500" armature=".02"/>
+        <joint name="right_hip_z" axis="0 0 1" range="-60 35" stiffness="500" damping="50" frictionloss="500" armature=".02"/>
         <geom name="right_thigh" fromto="0 0 -0.06 0 0 -0.36" size="0.055" density="1269"/>
         <site name="right_thigh" class="touch" pos="0 0 -0.21" size="0.056 0.301" zaxis="0 0 -1"/>
 
         <body name="right_shin" pos="0 0 -0.421546">
           <site name="right_knee" class="force-torque" pos="0 0 0"/>
-          <joint name="right_knee" pos="0 0 0" axis="0 1 0" range="0 160" stiffness="500" damping="50" armature=".02"/>
+          <joint name="right_knee" pos="0 0 0" axis="0 1 0" range="0 160" stiffness="500" damping="50" frictionloss="500" armature=".02"/>
           <geom name="right_shin" fromto="0 0 -0.045 0 0 -0.355"  size=".05" density="1014"/>
           <site name="right_shin" class="touch" pos="0 0 -0.2" size="0.051 0.156" zaxis="0 0 -1"/>
 
           <body name="right_foot" pos="0 0 -0.409870">
             <site name="right_ankle" class="force-torque"/>
-            <joint name="right_ankle_x" pos="0 0 0" axis="1 0 0" range="-30 30" stiffness="400" damping="40" armature=".01"/>
-            <joint name="right_ankle_y" pos="0 0 0" axis="0 1 0" range="-55 55" stiffness="400" damping="40" armature=".01"/>
-            <joint name="right_ankle_z" pos="0 0 0" axis="0 0 1" range="-40 40" stiffness="400" damping="40" armature=".01"/>
+            <joint name="right_ankle_x" pos="0 0 0" axis="1 0 0" range="-30 30" stiffness="400" damping="40" frictionloss="400" armature=".01"/>
+            <joint name="right_ankle_y" pos="0 0 0" axis="0 1 0" range="-55 55" stiffness="400" damping="40" frictionloss="400" armature=".01"/>
+            <joint name="right_ankle_z" pos="0 0 0" axis="0 0 1" range="-40 40" stiffness="400" damping="40" frictionloss="400" armature=".01"/>
             <geom name="right_foot" type="box" pos="0.045 0 -0.0225" size="0.0885 0.045 0.0275" density="1141"/>
             <site name="right_foot" class="touch" type="box" pos="0.045 0 -0.0225" size="0.0895 0.055 0.0285"/>
           </body>
@@ -149,23 +149,23 @@
 
       <body name="left_thigh" pos="0 0.084887 0">
         <site name="left_hip" class="force-torque"/>
-        <joint name="left_hip_x" axis="1 0 0" range="-15 60" stiffness="500" damping="50" armature=".02"/>
-        <joint name="left_hip_y" axis="0 1 0" range="-140 60" stiffness="500" damping="50" armature=".02"/>
-        <joint name="left_hip_z" axis="0 0 1" range="-35 60" stiffness="500" damping="50" armature=".02"/>
+        <joint name="left_hip_x" axis="1 0 0" range="-15 60" stiffness="500" damping="50" frictionloss="500" armature=".02"/>
+        <joint name="left_hip_y" axis="0 1 0" range="-140 60" stiffness="500" damping="50" frictionloss="500" armature=".02"/>
+        <joint name="left_hip_z" axis="0 0 1" range="-35 60" stiffness="500" damping="50" frictionloss="500" armature=".02"/>
         <geom name="left_thigh" fromto="0 0 -0.06 0 0 -0.36" size=".055" density="1269"/>
         <site name="left_thigh" class="touch" pos="0 0 -0.21" size="0.056 0.301" zaxis="0 0 -1"/>
 
         <body name="left_shin" pos="0 0 -0.421546">
           <site name="left_knee" class="force-torque" pos="0 0 .02"/>
-          <joint name="left_knee" pos="0 0 0" axis="0 1 0" range="0 160" stiffness="500" damping="50" armature=".02"/>
+          <joint name="left_knee" pos="0 0 0" axis="0 1 0" range="0 160" stiffness="500" damping="50" frictionloss="500" armature=".02"/>
           <geom name="left_shin" fromto="0 0 -0.045 0 0 -0.355"  size=".05" density="1014"/>
           <site name="left_shin" class="touch" pos="0 0 -0.2" size="0.051 0.156" zaxis="0 0 -1"/>
 
           <body name="left_foot" pos="0 0 -0.409870">
             <site name="left_ankle" class="force-torque"/>
-            <joint name="left_ankle_x" pos="0 0 0" axis="1 0 0" range="-30 30" stiffness="400" damping="40" armature=".01"/>
-            <joint name="left_ankle_y" pos="0 0 0" axis="0 1 0" range="-55 55" stiffness="400" damping="40" armature=".01"/>
-            <joint name="left_ankle_z" pos="0 0 0" axis="0 0 1" range="-40 40" stiffness="400" damping="40" armature=".01"/>
+            <joint name="left_ankle_x" pos="0 0 0" axis="1 0 0" range="-30 30" stiffness="400" damping="40" frictionloss="400" armature=".01"/>
+            <joint name="left_ankle_y" pos="0 0 0" axis="0 1 0" range="-55 55" stiffness="400" damping="40" frictionloss="400" armature=".01"/>
+            <joint name="left_ankle_z" pos="0 0 0" axis="0 0 1" range="-40 40" stiffness="400" damping="40" frictionloss="400" armature=".01"/>
             <geom name="left_foot" type="box" pos="0.045 0 -0.0225" size="0.0885 0.045 0.0275" density="1141"/>
             <site name="left_foot" class="touch" type="box" pos="0.045 0 -0.0225" size="0.0895 0.055 0.0285"/>
           </body>
