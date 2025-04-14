@@ -6,7 +6,6 @@ from sympy.physics.units import action
 from torch import Tensor
 from easydict import EasyDict
 from dataclasses import dataclass
-
 from phys_anim.utils.motion_lib import MotionLib
 from isaac_utils import rotations, torch_utils
 from poselib.core.rotation3d import quat_angle_axis, quat_inverse, quat_mul_norm
@@ -77,6 +76,41 @@ class StateActionLib(MotionLib):
         )
 
         pass
+
+    def get_window_state_for_disc(self, window_start, motion_id, window_len):
+        motion_start_idx = window_start + self.length_starts[motion_id]
+        motion_end_idx = motion_start_idx + window_len
+        assert motion_end_idx < self.length_starts[motion_id] + self.state.motion_num_frames[motion_id] - 1
+
+        root_pos = self.gts[motion_start_idx:motion_end_idx, 0].flip(0)
+        root_rot = self.grs[motion_start_idx:motion_end_idx, 0].flip(0)
+        local_rot = self.lrs[motion_start_idx:motion_end_idx].flip(0)
+        root_vel = self.grvs[motion_start_idx:motion_end_idx].flip(0)
+        root_ang_vel = self.gravs[motion_start_idx:motion_end_idx].flip(0)
+        global_vel = self.gvs[motion_start_idx:motion_end_idx].flip(0)
+        global_ang_vel = self.gavs[motion_start_idx:motion_end_idx].flip(0)
+        key_body_pos = self.gts[motion_start_idx:motion_end_idx, self.key_body_ids].flip(0)
+        dof_vel = self.dvs[motion_start_idx:motion_end_idx].flip(0)
+        rb_pos = self.gts[motion_start_idx:motion_end_idx].flip(0)
+        rb_rot = self.grs[motion_start_idx:motion_end_idx].flip(0)
+        dof_pos: Tensor = self._local_rotation_to_dof(local_rot, "exp_map")
+        action = self.actions[motion_start_idx:motion_end_idx].flip(0)
+
+        return MotionStateAction(
+            root_pos=root_pos,
+            root_rot=root_rot,
+            root_vel=root_vel,
+            root_ang_vel=root_ang_vel,
+            key_body_pos=key_body_pos,
+            dof_pos=dof_pos,
+            dof_vel=dof_vel,
+            local_rot=local_rot,
+            rb_pos=rb_pos,
+            rb_rot=rb_rot,
+            rb_vel=global_vel,
+            rb_ang_vel=global_ang_vel,
+            action=action
+        )
 
     def get_motion_state(self, sub_motion_ids, motion_times, joint_3d_format="exp_map")\
             -> MotionStateAction:
