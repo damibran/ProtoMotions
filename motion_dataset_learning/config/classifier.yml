@@ -1,0 +1,177 @@
+discriminator_obs_size_per_step: 206
+motion_file: output/recordings/IQL_seconddataset/sword_shield_state_action_reduce.yaml
+classifier:
+  config:
+    initializer: default
+    units:
+      - 1024
+      - 1024
+      - 512
+    discriminator_obs_historical_steps: 10
+    activation: relu
+    normalize_obs: True
+    obs_clamp_value: null
+    use_layer_norm: false
+    extra_inputs: null
+
+robot:
+  dof_obs_size: 78
+  number_of_actions: 31
+  self_obs_size: ${.self_obs_max_coords_size}
+  self_obs_max_coords_size: 253
+  num_bodies: ${len:${.bfs_body_names}}
+  contact_bodies: ${.bfs_body_names}
+  bfs_body_names:
+  - pelvis
+  - torso
+  - right_thigh
+  - left_thigh
+  - head
+  - right_upper_arm
+  - left_upper_arm
+  - right_shin
+  - left_shin
+  - right_lower_arm
+  - left_lower_arm
+  - right_foot
+  - left_foot
+  - right_hand
+  - shield
+  - left_hand
+  - sword
+  dfs_body_names:
+  - pelvis
+  - torso
+  - head
+  - right_upper_arm
+  - right_lower_arm
+  - right_hand
+  - sword
+  - left_upper_arm
+  - left_lower_arm
+  - shield
+  - left_hand
+  - right_thigh
+  - right_shin
+  - right_foot
+  - left_thigh
+  - left_shin
+  - left_foot
+  dfs_dof_names:
+  - abdomen_x
+  - abdomen_y
+  - abdomen_z
+  - neck_x
+  - neck_y
+  - neck_z
+  - right_shoulder_x
+  - right_shoulder_y
+  - right_shoulder_z
+  - right_elbow
+  - right_hand_x
+  - right_hand_y
+  - right_hand_z
+  - left_shoulder_x
+  - left_shoulder_y
+  - left_shoulder_z
+  - left_elbow
+  - right_hip_x
+  - right_hip_y
+  - right_hip_z
+  - right_knee
+  - right_ankle_x
+  - right_ankle_y
+  - right_ankle_z
+  - left_hip_x
+  - left_hip_y
+  - left_hip_z
+  - left_knee
+  - left_ankle_x
+  - left_ankle_y
+  - left_ankle_z
+  bfs_dof_names:
+  - abdomen_x
+  - abdomen_y
+  - abdomen_z
+  - right_hip_x
+  - right_hip_y
+  - right_hip_z
+  - left_hip_x
+  - left_hip_y
+  - left_hip_z
+  - neck_x
+  - neck_y
+  - neck_z
+  - right_shoulder_x
+  - right_shoulder_y
+  - right_shoulder_z
+  - left_shoulder_x
+  - left_shoulder_y
+  - left_shoulder_z
+  - right_knee
+  - left_knee
+  - right_elbow
+  - left_elbow
+  - right_ankle_x
+  - right_ankle_y
+  - right_ankle_z
+  - left_ankle_x
+  - left_ankle_y
+  - left_ankle_z
+  - right_hand_x
+  - right_hand_y
+  - right_hand_z
+  dof_body_ids: ???
+  key_bodies:
+  - sword
+  - shield
+  non_termination_contact_bodies:
+  - right_foot
+  - left_foot
+  foot_name: null
+  init_state: null
+  contact_pairs_multiplier: 16
+  num_key_bodies: ${len:${robot.key_bodies}}
+  mimic_small_marker_bodies: null
+  control:
+    control_type: isaac_pd
+    stiffness: null
+    damping: null
+    action_scale: 1.0
+    isaac_pd_scale: false
+    clamp_actions: 1.0
+  asset:
+    collapse_fixed_joints: null
+    replace_cylinder_with_capsule: null
+    flip_visual_attachments: null
+    armature: null
+    thickness: null
+    max_angular_velocity: null
+    max_linear_velocity: null
+    density: null
+    angular_damping: null
+    linear_damping: null
+    disable_gravity: null
+    fix_base_link: null
+    default_dof_drive_mode: 1
+    robot_type: amp_humanoid_sword_shield
+    asset_file_name: mjcf/${robot.asset.robot_type}.xml
+    asset_root: phys_anim/data/assets
+    self_collisions: true
+    filter_ints: null
+  dfs_dof_body_ids:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 7
+  - 8
+  - 11
+  - 12
+  - 13
+  - 14
+  - 15
+  - 16
+  right_foot_name: right_foot
+  left_foot_name: left_foot
