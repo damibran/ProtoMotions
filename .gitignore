@@ -8,3 +8,4 @@ phys_anim/data/motions/
 outputs
 py_log.log
 output
+motion_dataset_learning/runs/

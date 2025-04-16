@@ -10,12 +10,15 @@ from phys_anim.agents.models.mlp import MLP_WithNorm
 from torch import nn
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
+from datetime import datetime
 
 config = OmegaConf.load('motion_dataset_learning/config/classifier.yml')
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-writer = SummaryWriter(log_dir="motion_dataset_learning/runs/classifier_training")
+root_dir = "motion_dataset_learning/runs/classifier_training/" +  datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+
+writer = SummaryWriter(log_dir=root_dir)
 
 num_disc_hist_step = config.classifier.config.discriminator_obs_historical_steps
 
@@ -59,7 +62,7 @@ optimizer = torch.optim.Adam(classifier.parameters(), lr=1e-3)
 criterion = nn.CrossEntropyLoss()
 
 # Training loop
-num_epochs = 1000
+num_epochs = 15
 batch_size = 128
 epoch = 0
 
@@ -114,3 +117,5 @@ for _ in tqdm(range(num_epochs), desc=f"Epoch {epoch}"):
     epoch += 1
 
 writer.close()
+
+torch.save(classifier.state_dict(),root_dir + "/classifier.pth")
