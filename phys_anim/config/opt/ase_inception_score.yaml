@@ -1,0 +1,19 @@
+# @package _global_
+
+env:
+  config:
+    inception_batch_size: 128
+    classifier:
+      config:
+        checkpoint: motion_dataset_learning/runs/classifier_training/2025-04-16-20-54-16/classifier.pth
+        initializer: default
+        units:
+          - 1024
+          - 1024
+          - 512
+        discriminator_obs_historical_steps: 10
+        activation: relu
+        normalize_obs: True
+        obs_clamp_value: null
+        use_layer_norm: false
+        extra_inputs: null

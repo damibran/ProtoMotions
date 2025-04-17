@@ -78,3 +78,6 @@ class BaseInterface(object):
 
     def close(self):
         raise NotImplementedError
+
+    def post_evaluate(self):
+        pass

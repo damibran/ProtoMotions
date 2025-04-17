@@ -14,15 +14,12 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 num_disc_hist_step = config.discriminator.config.discriminator_obs_historical_steps
 
-# load encoder model q(a|(s,a)^n)
 encoder = JointDiscWithMutualInformationEncMLP(config.discriminator.config,
                                                num_in = config.discriminator_obs_size_per_step * num_disc_hist_step)
 
 
 encoder.load_state_dict(torch.load(config.discriminator.config.checkpoint)["discriminator"])
 encoder.to(device)
-# load all eval motions
-
 
 dof_body_ids = config.robot.dfs_dof_body_ids
 dof_offsets = []
@@ -52,13 +49,13 @@ motion_lib = StateActionLib(
         )
 
 def get_motion_windows_count(motion_id):
-    return motion_lib.state.motion_num_frames[motion_id] - num_disc_hist_step - 1
+    return motion_lib.state.motion_num_frames[motion_id] - num_disc_hist_step
 
 def get_motions_sum_encoder_distance(motion_id, other_motion_id):
     sum = 0
-    for window_start in range(get_motion_windows_count(motion_id)):
-        for other_window_start in range(get_motion_windows_count(other_motion_id)):
-            ref_state = motion_lib.get_window_state_for_disc(window_start, motion_id, num_disc_hist_step)
+    for window_start_index in range(get_motion_windows_count(motion_id) - 1):
+        for other_window_start in range(get_motion_windows_count(other_motion_id) - 1):
+            ref_state = motion_lib.get_window_state_for_disc(window_start_index, motion_id, num_disc_hist_step)
             obs = build_disc_action_observations(
                 ref_state.root_pos,
                 ref_state.root_rot,

@@ -32,7 +32,21 @@ from torch import Tensor
 from phys_anim.envs.amp.common import BaseDisc
 from phys_anim.envs.humanoid.isaacgym import Humanoid
 from phys_anim.envs.humanoid.humanoid_utils import build_disc_action_observations
+from phys_anim.agents.models.mlp import MLP_WithNorm
 
+# calculate the inception score for p(y|x)
+def calculate_inception_score(generated_probs, eps=1E-16):
+    # Marginal distribution p(y) = mean over all samples
+    p_y = generated_probs.mean(dim=0)  # Shape [C]]
+
+    # KL divergence for each sample: KL(p(y|x) || p(y))
+    kl_div = (generated_probs * (torch.log(generated_probs + eps) - torch.log(p_y + eps))).sum(dim=1)
+
+    # Average KL and exponentiate
+    avg_kl = kl_div.mean()
+    is_score = torch.exp(avg_kl)
+
+    return is_score.item()
 
 class DiscHumanoid(BaseDisc, Humanoid):  # type: ignore[misc]
     def __init__(self, config, device: torch.device):
@@ -42,6 +56,21 @@ class DiscActionHumanoid(DiscHumanoid):  # type: ignore[misc]
     def __init__(self, config, device: torch.device):
         super().__init__(config, device)
         self.actions = torch.zeros_like(self.dof_pos,device=self.device, dtype=torch.float32)
+        self.preds_batch = []
+        self.inception_results = []
+
+    def post_physics_step(self):
+        super().post_physics_step()
+        if len(self.preds_batch) < self.config.inception_batch_size:
+            logits = self.classifier({'obs': self.extras["disc_obs"]})
+            preds = torch.nn.functional.softmax(logits, dim=-1)
+            self.preds_batch.append(logits)
+        else:
+            preds_batch_stack = torch.stack(self.preds_batch, dim=0)
+            is_score = calculate_inception_score(preds_batch_stack)
+            print(is_score)
+            self.inception_results.append(is_score)
+            self.preds_batch = []
 
     def reset_disc_hist_ref(self, env_ids, motion_ids, motion_times):
         dt = self.dt
@@ -130,6 +159,19 @@ class DiscActionHumanoid(DiscHumanoid):  # type: ignore[misc]
             self.w_last,
         )
         return disc_obs_demo
+
+    def on_environment_ready(self):
+        super().on_environment_ready()
+        if self.config.get('classifier', None) is not None:
+            num_classes = len(self.motion_lib.state.motion_files)
+            self.classifier = MLP_WithNorm(
+                    self.config.classifier.config,
+                    num_in=self.discriminator_obs_size_per_step * self.config.discriminator_obs_historical_steps,
+                    num_out=num_classes,
+                ).to(self.device)
+            state_dict = torch.load(self.classifier.config.checkpoint)
+            self.classifier.load_state_dict(state_dict)
+            pass
 
     def compute_disc_observations(self, env_ids=None):
         current_state = self.get_bodies_state()
