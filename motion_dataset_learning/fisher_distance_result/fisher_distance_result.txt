@@ -1,1 +1,29 @@
 output/recordings/IQL_seconddataset/RL_Avatar_Atk_2xCombo01_Motion_0.npy
+tensor(0.8442, device='cuda:0')
+output/recordings/IQL_seconddataset/RL_Avatar_Atk_Kick_Motion_0.npy
+tensor(1.3817, device='cuda:0')
+output/recordings/IQL_seconddataset/RL_Avatar_Atk_ShieldSwipe01_Motion_0.npy
+tensor(1.1235, device='cuda:0')
+output/recordings/IQL_seconddataset/RL_Avatar_Counter_Atk03_Motion_0.npy
+tensor(0.9280, device='cuda:0')
+output/recordings/IQL_seconddataset/RL_Avatar_Idle_Ready_Motion_0.npy
+tensor(0.4036, device='cuda:0')
+output/recordings/IQL_seconddataset/RL_Avatar_RunBackward_Motion_0.npy
+tensor(0.5551, device='cuda:0')
+output/recordings/IQL_seconddataset/RL_Avatar_RunForward_Motion_0.npy
+tensor(0.6937, device='cuda:0')
+output/recordings/IQL_seconddataset/RL_Avatar_RunLeft_Motion_0.npy
+tensor(0.4959, device='cuda:0')
+output/recordings/IQL_seconddataset/RL_Avatar_RunRight_Motion_0.npy
+tensor(0.6125, device='cuda:0')
+output/recordings/IQL_seconddataset/RL_Avatar_TurnLeft90_Motion_0.npy
+tensor(2.0543, device='cuda:0')
+output/recordings/IQL_seconddataset/RL_Avatar_TurnLeft180_Motion_0.npy
+tensor(1.0396, device='cuda:0')
+output/recordings/IQL_seconddataset/RL_Avatar_TurnRight90_Motion_0.npy
+tensor(1.2997, device='cuda:0')
+output/recordings/IQL_seconddataset/RL_Avatar_TurnRight180_Motion_0.npy
+tensor(0.8113, device='cuda:0')
+
+
+AVG: tensor(0.9418, device='cuda:0')

@@ -9,3 +9,4 @@ outputs
 py_log.log
 output
 motion_dataset_learning/runs/
+motion_dataset_learning/fisher_distance_result/

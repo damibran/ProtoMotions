@@ -52,52 +52,61 @@ def get_motion_windows_count(motion_id):
     return motion_lib.state.motion_num_frames[motion_id] - num_disc_hist_step
 
 def get_motions_sum_encoder_distance(motion_id, other_motion_id):
-    sum = 0
-    for window_start_index in range(get_motion_windows_count(motion_id) - 1):
-        for other_window_start in range(get_motion_windows_count(other_motion_id) - 1):
-            ref_state = motion_lib.get_window_state_for_disc(window_start_index, motion_id, num_disc_hist_step)
-            obs = build_disc_action_observations(
-                ref_state.root_pos,
-                ref_state.root_rot,
-                ref_state.root_vel,
-                ref_state.root_ang_vel,
-                ref_state.dof_pos,
-                ref_state.dof_vel,
-                ref_state.key_body_pos,
-                torch.zeros(1, device=device),
-                ref_state.action,
-                True,
-                True,
-                config.robot.dof_obs_size,
-                dof_offsets,
-                False,
-                True,
-            )
-            z = encoder({'obs': obs.flatten()}, return_enc=True)
-            ref_state = motion_lib.get_window_state_for_disc(other_window_start, other_motion_id, num_disc_hist_step)
-            obs = build_disc_action_observations(
-                ref_state.root_pos,
-                ref_state.root_rot,
-                ref_state.root_vel,
-                ref_state.root_ang_vel,
-                ref_state.dof_pos,
-                ref_state.dof_vel,
-                ref_state.key_body_pos,
-                torch.zeros(1, device=device),
-                ref_state.action,
-                True,
-                True,
-                config.robot.dof_obs_size,
-                dof_offsets,
-                False,
-                True,
-            )
-            z_other = encoder({'obs': obs.flatten()}, return_enc=True)
-            diff = z_other - z
-            sum += torch.norm(diff).item()
-    return sum
+    # Get total number of windows
+    motion_window_count = get_motion_windows_count(motion_id)
+    other_motion_window_count = get_motion_windows_count(other_motion_id)
 
-get_motions_sum_encoder_distance(0,1)
+    # Build all observation tensors for motion_id
+    obs_list_1 = []
+    for i in range(motion_window_count - 1):
+        state = motion_lib.get_window_state_for_disc(i, motion_id, num_disc_hist_step)
+        obs = build_disc_action_observations(
+            state.root_pos,
+            state.root_rot,
+            state.root_vel,
+            state.root_ang_vel,
+            state.dof_pos,
+            state.dof_vel,
+            state.key_body_pos,
+            torch.zeros(1, device=device),
+            state.action,
+            True, True, config.robot.dof_obs_size, dof_offsets, False, True
+        )
+        obs_list_1.append(obs.flatten())
+
+    # Build all observation tensors for other_motion_id
+    obs_list_2 = []
+    for i in range(other_motion_window_count - 1):
+        state = motion_lib.get_window_state_for_disc(i, other_motion_id, num_disc_hist_step)
+    obs = build_disc_action_observations(
+        state.root_pos,
+        state.root_rot,
+        state.root_vel,
+        state.root_ang_vel,
+        state.dof_pos,
+        state.dof_vel,
+        state.key_body_pos,
+        torch.zeros(1, device=device),
+        state.action,
+        True, True, config.robot.dof_obs_size, dof_offsets, False, True
+    )
+    obs_list_2.append(obs.flatten())
+
+    # Stack and encode all observations
+    obs_tensor_1 = torch.stack(obs_list_1)  # Shape: [N1, D]
+    obs_tensor_2 = torch.stack(obs_list_2)  # Shape: [N2, D]
+
+    z1 = encoder({'obs': obs_tensor_1}, return_enc=True)  # Shape: [N1, E]
+    z2 = encoder({'obs': obs_tensor_2}, return_enc=True)  # Shape: [N2, E]
+
+    # Compute all pairwise distances
+    # z1: [N1, E], z2: [N2, E]
+    # Compute pairwise Euclidean distance matrix: [N1, N2]
+    diff = z1[:, None, :] - z2[None, :, :]  # [N1, N2, E]
+    dists = torch.norm(diff, dim=2)         # [N1, N2]
+    total_dist = dists.sum().item()
+
+    return total_dist
 
 all_coeffs = []
 with open('motion_dataset_learning/fisher_distance_result/fisher_distance_result.txt','w') as out_file:

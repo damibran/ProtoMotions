@@ -2,7 +2,7 @@ discriminator_obs_size_per_step: 206
 motion_file: output/recordings/IQL_seconddataset/sword_shield_state_action_reduce.yaml
 discriminator:
   config:
-    checkpoint: results/ase/lightning_logs/version_5_from_scratch/last.ckpt
+    checkpoint: results/ase/lightning_logs/version_0_from_scratch/last.ckpt
     initializer: default
     units:
     - 1024
