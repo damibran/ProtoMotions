@@ -1,8 +1,9 @@
 discriminator_obs_size_per_step: 206
 motion_file: output/recordings/IQL_seconddataset/sword_shield_state_action_reduce.yaml
+save_file_path: motion_dataset_learning/fisher_distance_result/ase_s_s.txt
 discriminator:
   config:
-    checkpoint: results/ase/lightning_logs/version_0_from_scratch/last.ckpt
+    checkpoint: results/ase/lightning_logs/version_5/last.ckpt
     initializer: default
     units:
     - 1024
@@ -23,9 +24,9 @@ discriminator:
       obs_clamp_value: null
       use_layer_norm: ${..use_layer_norm}
     mi_enc:
-      latent_dim: [8]
+      latent_dim: [64]
       latent_types: [hypersphere]
-    latent_dim: [8]
+    latent_dim: [64]
 
 robot:
   dof_obs_size: 78

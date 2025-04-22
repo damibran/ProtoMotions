@@ -25,7 +25,7 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+import numpy as np
 import torch
 from torch import Tensor
 
@@ -64,13 +64,18 @@ class DiscActionHumanoid(DiscHumanoid):  # type: ignore[misc]
         if len(self.preds_batch) < self.config.inception_batch_size:
             logits = self.classifier({'obs': self.extras["disc_obs"]})
             preds = torch.nn.functional.softmax(logits, dim=-1)
-            self.preds_batch.append(logits)
+            self.preds_batch.append(preds)
         else:
             preds_batch_stack = torch.stack(self.preds_batch, dim=0)
             is_score = calculate_inception_score(preds_batch_stack)
-            print(is_score)
             self.inception_results.append(is_score)
             self.preds_batch = []
+
+    def post_evaluate(self):
+        arr = np.array(self.inception_results)
+        with open(self.config.save_file, 'w') as f:
+            f.write(str(arr.mean().item()))
+        pass
 
     def reset_disc_hist_ref(self, env_ids, motion_ids, motion_times):
         dt = self.dt

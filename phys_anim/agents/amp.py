@@ -525,12 +525,12 @@ class AMP(PPO):
 
     def load_parameters(self, state_dict):
         super().load_parameters(state_dict)
-        #if not self.disable_discriminator:
-        #    self.discriminator.load_state_dict(state_dict["discriminator"])
-        #    self.discriminator_optimizer.load_state_dict(
-        #        state_dict["discriminator_optimizer"]
-        #    )
-        #    if self.config.discriminator_lr_scheduler is not None:
-        #        self.discriminator_lr_scheduler.load_state_dict(
-        #            state_dict["discriminator_lr_scheduler"]
-        #        )
+        if not self.disable_discriminator:
+            self.discriminator.load_state_dict(state_dict["discriminator"])
+            self.discriminator_optimizer.load_state_dict(
+                state_dict["discriminator_optimizer"]
+            )
+            if self.config.discriminator_lr_scheduler is not None:
+                self.discriminator_lr_scheduler.load_state_dict(
+                    state_dict["discriminator_lr_scheduler"]
+                )

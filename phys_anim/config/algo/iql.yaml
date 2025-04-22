@@ -6,10 +6,12 @@ algo:
     dataset_files:
       - output/recordings/mimic_train/RL_Avatar_Atk_2xCombo01_Motion/dataset.hdf5
       - output/recordings/mimic_train/RL_Avatar_Atk_Kick_Motion/dataset.hdf5
+      - output/recordings/mimic_train/RL_Avatar_Atk_ShieldSwipe01_Motion/dataset.hdf5
       - output/recordings/mimic_train/RL_Avatar_Counter_Atk03_Motion/dataset.hdf5
       - output/recordings/mimic_train/RL_Avatar_Idle_Ready_Motion/dataset.hdf5
       - output/recordings/mimic_train/RL_Avatar_RunBackward_Motion/dataset.hdf5
       - output/recordings/mimic_train/RL_Avatar_RunForward_Motion/dataset.hdf5
+      - output/recordings/mimic_train/RL_Avatar_RunLeft_Motion/dataset.hdf5
       - output/recordings/mimic_train/RL_Avatar_RunRight_Motion/dataset.hdf5
       - output/recordings/mimic_train/RL_Avatar_TurnLeft90_Motion/dataset.hdf5
       - output/recordings/mimic_train/RL_Avatar_TurnLeft180_Motion/dataset.hdf5
@@ -19,10 +21,12 @@ algo:
     demo_dataset_files:
       - output/recordings/mimic_eval/RL_Avatar_Atk_2xCombo01_Motion/dataset.hdf5
       - output/recordings/mimic_eval/RL_Avatar_Atk_Kick_Motion/dataset.hdf5
+      - output/recordings/mimic_eval/RL_Avatar_Atk_ShieldSwipe01_Motion/dataset.hdf5
       - output/recordings/mimic_eval/RL_Avatar_Counter_Atk03_Motion/dataset.hdf5
       - output/recordings/mimic_eval/RL_Avatar_Idle_Ready_Motion/dataset.hdf5
       - output/recordings/mimic_eval/RL_Avatar_RunBackward_Motion/dataset.hdf5
       - output/recordings/mimic_eval/RL_Avatar_RunForward_Motion/dataset.hdf5
+      - output/recordings/mimic_eval/RL_Avatar_RunLeft_Motion/dataset.hdf5
       - output/recordings/mimic_eval/RL_Avatar_RunRight_Motion/dataset.hdf5
       - output/recordings/mimic_eval/RL_Avatar_TurnLeft90_Motion/dataset.hdf5
       - output/recordings/mimic_eval/RL_Avatar_TurnLeft180_Motion/dataset.hdf5
@@ -156,7 +160,7 @@ algo:
 
     # ASE parameters
     infomax_parameters:
-      latent_dim: [ 8 ]
+      latent_dim: [ 64 ]
       latent_types: [ hypersphere ]
 
       mi_reward_w: [ 0.5 ]

@@ -50,7 +50,7 @@ algo:
 
     # ASE parameters
     infomax_parameters:
-      latent_dim: [8] # todo: delete 64
+      latent_dim: [64] # todo: delete 64
       latent_types: [hypersphere]
 
       mi_reward_w: [0.5]

@@ -78,19 +78,19 @@ def get_motions_sum_encoder_distance(motion_id, other_motion_id):
     obs_list_2 = []
     for i in range(other_motion_window_count - 1):
         state = motion_lib.get_window_state_for_disc(i, other_motion_id, num_disc_hist_step)
-    obs = build_disc_action_observations(
-        state.root_pos,
-        state.root_rot,
-        state.root_vel,
-        state.root_ang_vel,
-        state.dof_pos,
-        state.dof_vel,
-        state.key_body_pos,
-        torch.zeros(1, device=device),
-        state.action,
-        True, True, config.robot.dof_obs_size, dof_offsets, False, True
-    )
-    obs_list_2.append(obs.flatten())
+        obs = build_disc_action_observations(
+            state.root_pos,
+            state.root_rot,
+            state.root_vel,
+            state.root_ang_vel,
+            state.dof_pos,
+            state.dof_vel,
+            state.key_body_pos,
+            torch.zeros(1, device=device),
+            state.action,
+            True, True, config.robot.dof_obs_size, dof_offsets, False, True
+        )
+        obs_list_2.append(obs.flatten())
 
     # Stack and encode all observations
     obs_tensor_1 = torch.stack(obs_list_1)  # Shape: [N1, D]
@@ -109,13 +109,13 @@ def get_motions_sum_encoder_distance(motion_id, other_motion_id):
     return total_dist
 
 all_coeffs = []
-with open('motion_dataset_learning/fisher_distance_result/fisher_distance_result.txt','w') as out_file:
+with open(config.save_file_path,'w') as out_file:
     for motion_id in range(len(motion_lib.state.motion_files)):
         out_file.write(str(motion_lib.state.motion_files[motion_id]) + '\n')
         print(motion_lib.state.motion_files[motion_id])
         self_sum = get_motions_sum_encoder_distance(motion_id, motion_id) / (pow(get_motion_windows_count(motion_id),2))
-        all_sum_distance = 0
-        all_sum_window_count = 0
+        all_sum_distance = 0.0
+        all_sum_window_count = 0.0
         for other_motion_id in range(len(motion_lib.state.motion_files)):
             all_sum_distance += get_motions_sum_encoder_distance(motion_id ,other_motion_id)
             all_sum_window_count += get_motion_windows_count(other_motion_id)
