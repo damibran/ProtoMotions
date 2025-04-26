@@ -51,6 +51,39 @@ def calculate_inception_score(generated_probs, eps=1E-16):
 class DiscHumanoid(BaseDisc, Humanoid):  # type: ignore[misc]
     def __init__(self, config, device: torch.device):
         super().__init__(config, device)
+        self.preds_batch = []
+        self.inception_results = []
+
+    def post_physics_step(self):
+        super().post_physics_step()
+        if len(self.preds_batch) < self.config.inception_batch_size:
+            logits = self.classifier({'obs': self.extras["disc_obs"]})
+            preds = torch.nn.functional.softmax(logits, dim=-1)
+            self.preds_batch.append(preds)
+        else:
+            preds_batch_stack = torch.stack(self.preds_batch, dim=0)
+            is_score = calculate_inception_score(preds_batch_stack)
+            self.inception_results.append(is_score)
+            self.preds_batch = []
+
+    def post_evaluate(self):
+        arr = np.array(self.inception_results)
+        with open(self.config.save_file, 'w') as f:
+            f.write(str(arr.mean().item()))
+        pass
+
+    def on_environment_ready(self):
+        super().on_environment_ready()
+        if self.config.get('classifier', None) is not None:
+            num_classes = len(self.motion_lib.state.motion_files)
+            self.classifier = MLP_WithNorm(
+                    self.config.classifier.config,
+                    num_in=self.discriminator_obs_size_per_step * self.config.discriminator_obs_historical_steps,
+                    num_out=num_classes,
+                ).to(self.device)
+            state_dict = torch.load(self.classifier.config.checkpoint)
+            self.classifier.load_state_dict(state_dict)
+            pass
 
 class DiscActionHumanoid(DiscHumanoid):  # type: ignore[misc]
     def __init__(self, config, device: torch.device):

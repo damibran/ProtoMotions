@@ -2,9 +2,9 @@ import random
 
 from omegaconf import OmegaConf
 from phys_anim.agents.models.infomax import JointDiscWithMutualInformationEncMLP
-from phys_anim.utils.StateActionLib import StateActionLib
+from phys_anim.utils.StateActionLib import StateActionLib, MotionLib
 from poselib.skeleton.skeleton3d import SkeletonMotion
-from phys_anim.envs.humanoid.humanoid_utils import build_disc_action_observations
+from phys_anim.envs.humanoid.humanoid_utils import build_disc_action_observations, build_disc_observations
 import torch
 from phys_anim.agents.models.mlp import MLP_WithNorm
 from torch import nn
@@ -41,7 +41,7 @@ key_body_ids = torch.tensor(
                 dtype=torch.long,
             )
 
-motion_lib = StateActionLib(
+motion_lib = MotionLib(
             motion_file=config.motion_file,
             dof_body_ids=dof_body_ids,
             dof_offsets=dof_offsets,
@@ -82,7 +82,7 @@ for _ in tqdm(range(num_epochs), desc=f"Epoch {epoch}"):
             rand_motion,
             num_disc_hist_step
         )
-        obs = build_disc_action_observations(
+        obs = build_disc_observations(
             ref_state.root_pos,
             ref_state.root_rot,
             ref_state.root_vel,
@@ -91,7 +91,6 @@ for _ in tqdm(range(num_epochs), desc=f"Epoch {epoch}"):
             ref_state.dof_vel,
             ref_state.key_body_pos,
             torch.zeros(1, device=device),
-            ref_state.action,
             True,
             True,
             config.robot.dof_obs_size,

@@ -1,4 +1,4 @@
-discriminator_obs_size_per_step: 206
+discriminator_obs_size_per_step: 128
 motion_file: output/recordings/IQL_seconddataset/sword_shield_state_action_reduce.yaml
 classifier:
   config:

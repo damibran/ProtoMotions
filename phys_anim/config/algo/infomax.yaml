@@ -63,8 +63,8 @@ algo:
       diversity_bonus: 0.01
 
       random_latents: True
-      latent_steps_min: 1
-      latent_steps_max: 150
+      latent_steps_min: 10
+      latent_steps_max: 30
 
     extra_inputs:
       latents:

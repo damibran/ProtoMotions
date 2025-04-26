@@ -2,9 +2,9 @@ import os
 
 from omegaconf import OmegaConf
 from phys_anim.agents.models.infomax import JointDiscWithMutualInformationEncMLP
-from phys_anim.utils.StateActionLib import StateActionLib
+from phys_anim.utils.StateActionLib import StateActionLib, MotionLib
 from poselib.skeleton.skeleton3d import SkeletonMotion
-from phys_anim.envs.humanoid.humanoid_utils import build_disc_action_observations
+from phys_anim.envs.humanoid.humanoid_utils import build_disc_action_observations,build_disc_observations
 import torch
 
 
@@ -40,7 +40,7 @@ key_body_ids = torch.tensor(
                 dtype=torch.long,
             )
 
-motion_lib = StateActionLib(
+motion_lib = MotionLib(
             motion_file=config.motion_file,
             dof_body_ids=dof_body_ids,
             dof_offsets=dof_offsets,
@@ -60,7 +60,7 @@ def get_motions_sum_encoder_distance(motion_id, other_motion_id):
     obs_list_1 = []
     for i in range(motion_window_count - 1):
         state = motion_lib.get_window_state_for_disc(i, motion_id, num_disc_hist_step)
-        obs = build_disc_action_observations(
+        obs = build_disc_observations(
             state.root_pos,
             state.root_rot,
             state.root_vel,
@@ -69,7 +69,6 @@ def get_motions_sum_encoder_distance(motion_id, other_motion_id):
             state.dof_vel,
             state.key_body_pos,
             torch.zeros(1, device=device),
-            state.action,
             True, True, config.robot.dof_obs_size, dof_offsets, False, True
         )
         obs_list_1.append(obs.flatten())
@@ -78,7 +77,7 @@ def get_motions_sum_encoder_distance(motion_id, other_motion_id):
     obs_list_2 = []
     for i in range(other_motion_window_count - 1):
         state = motion_lib.get_window_state_for_disc(i, other_motion_id, num_disc_hist_step)
-        obs = build_disc_action_observations(
+        obs = build_disc_observations(
             state.root_pos,
             state.root_rot,
             state.root_vel,
@@ -87,7 +86,6 @@ def get_motions_sum_encoder_distance(motion_id, other_motion_id):
             state.dof_vel,
             state.key_body_pos,
             torch.zeros(1, device=device),
-            state.action,
             True, True, config.robot.dof_obs_size, dof_offsets, False, True
         )
         obs_list_2.append(obs.flatten())

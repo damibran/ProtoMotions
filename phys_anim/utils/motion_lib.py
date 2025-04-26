@@ -266,6 +266,39 @@ class MotionLib(DeviceDtypeModuleMixin):
 
         self.to(device)
 
+    def get_window_state_for_disc(self, window_start, motion_id, window_len):
+        motion_start_idx = window_start + self.length_starts[motion_id]
+        motion_end_idx = motion_start_idx + window_len
+        assert motion_end_idx < self.length_starts[motion_id] + self.state.motion_num_frames[motion_id] - 1
+
+        root_pos = self.gts[motion_start_idx:motion_end_idx, 0].flip(0)
+        root_rot = self.grs[motion_start_idx:motion_end_idx, 0].flip(0)
+        local_rot = self.lrs[motion_start_idx:motion_end_idx].flip(0)
+        root_vel = self.grvs[motion_start_idx:motion_end_idx].flip(0)
+        root_ang_vel = self.gravs[motion_start_idx:motion_end_idx].flip(0)
+        global_vel = self.gvs[motion_start_idx:motion_end_idx].flip(0)
+        global_ang_vel = self.gavs[motion_start_idx:motion_end_idx].flip(0)
+        key_body_pos = self.gts[motion_start_idx:motion_end_idx, self.key_body_ids].flip(0)
+        dof_vel = self.dvs[motion_start_idx:motion_end_idx].flip(0)
+        rb_pos = self.gts[motion_start_idx:motion_end_idx].flip(0)
+        rb_rot = self.grs[motion_start_idx:motion_end_idx].flip(0)
+        dof_pos: Tensor = self._local_rotation_to_dof(local_rot, "exp_map")
+
+        return MotionState(
+            root_pos=root_pos,
+            root_rot=root_rot,
+            root_vel=root_vel,
+            root_ang_vel=root_ang_vel,
+            key_body_pos=key_body_pos,
+            dof_pos=dof_pos,
+            dof_vel=dof_vel,
+            local_rot=local_rot,
+            rb_pos=rb_pos,
+            rb_rot=rb_rot,
+            rb_vel=global_vel,
+            rb_ang_vel=global_ang_vel,
+        )
+
     def num_motions(self):
         """Returns the number of motions in the state.
 
