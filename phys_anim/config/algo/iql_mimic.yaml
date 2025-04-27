@@ -103,7 +103,7 @@ algo:
     max_epochs: 10000
     normalize_obs: True
     obs_clamp_value: null
-    discount: 0.1
+    discount: 0.99
     beta: 3 # aka temperatue
 
     eval_callbacks: null

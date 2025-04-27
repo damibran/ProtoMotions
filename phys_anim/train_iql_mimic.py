@@ -100,8 +100,8 @@ def main(config: OmegaConf):
     with open(save_dir / "config.yaml", "w") as file:
         OmegaConf.save(unresolved_conf, file)
 
-    #algo.fit()
-    algo.dataset_eval()
+    algo.fit()
+    #algo.dataset_eval()
 
 
 if __name__ == "__main__":
