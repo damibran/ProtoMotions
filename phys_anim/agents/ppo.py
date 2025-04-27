@@ -176,6 +176,8 @@ class PPO:
 
         self.eval_callbacks: list[RL_EvalCallback] = []
 
+
+
     @property
     def should_stop(self):
         return self.fabric.broadcast(self._should_stop)
@@ -215,6 +217,31 @@ class PPO:
             )
             self.lr_schedulers.append(self.critic_lr_scheduler)
 
+        qf1: NormObsBase = instantiate(
+            self.config.critic_sa, num_in=self.num_obs, num_out=1
+        )
+        self.qf1 = self.fabric.setup(qf1)
+
+        qf2: NormObsBase = instantiate(
+            self.config.critic_sa, num_in=self.num_obs, num_out=1
+        )
+        self.qf2 = self.fabric.setup(qf2)
+
+        target_qf1: NormObsBase = instantiate(
+            self.config.critic_sa, num_in=self.num_obs, num_out=1
+        )
+        self.target_qf1 = self.fabric.setup(target_qf1)
+
+        target_qf2: NormObsBase = instantiate(
+            self.config.critic_sa, num_in=self.num_obs, num_out=1
+        )
+        self.target_qf2 = self.fabric.setup(target_qf2)
+
+        vf: NormObsBase = instantiate(
+            self.config.critic_s, num_in=self.num_obs, num_out=1
+        )
+        self.vf = self.fabric.setup(vf)
+
     def load(self, checkpoint: Path):
         if checkpoint is not None:
             checkpoint = Path(checkpoint).resolve()
@@ -227,23 +254,30 @@ class PPO:
         self.best_evaluated_score = state_dict.get("best_evaluated_score", None)
 
         self.actor.load_state_dict(state_dict["actor"])
-        self.critic.load_state_dict(state_dict["critic"])
-        self.actor_optimizer.load_state_dict(state_dict["actor_optimizer"])
-        self.critic_optimizer.load_state_dict(state_dict["critic_optimizer"])
-        if self.config.actor_lr_scheduler is not None:
-            self.actor_lr_scheduler.load_state_dict(state_dict["actor_lr_scheduler"])
-        if self.config.critic_lr_scheduler is not None:
-            self.critic_lr_scheduler.load_state_dict(state_dict["critic_lr_scheduler"])
 
-        if self.config.normalize_values:
-            if state_dict["running_val_norm"] is not None: # todo: add running_val_norm in offline
-                self.running_val_norm.load_state_dict(state_dict["running_val_norm"])
+        self.target_qf1.load_state_dict(state_dict["q1_target"])
+        self.target_qf2.load_state_dict(state_dict["q1_target"])
+        self.qf1.load_state_dict(state_dict["q1"])
+        self.qf2.load_state_dict(state_dict["q2"])
+        self.vf.load_state_dict(state_dict["critic"])
 
-        if state_dict["episode_reward_meter"] is not None:
-            self.episode_reward_meter.load_state_dict(state_dict["episode_reward_meter"])
-
-        if state_dict["episode_length_meter"] is not None:
-            self.episode_length_meter.load_state_dict(state_dict["episode_length_meter"])
+        #self.critic.load_state_dict(state_dict["critic"])
+        #self.actor_optimizer.load_state_dict(state_dict["actor_optimizer"])
+        #self.critic_optimizer.load_state_dict(state_dict["critic_optimizer"])
+        #if self.config.actor_lr_scheduler is not None:
+        #    self.actor_lr_scheduler.load_state_dict(state_dict["actor_lr_scheduler"])
+        #if self.config.critic_lr_scheduler is not None:
+        #    self.critic_lr_scheduler.load_state_dict(state_dict["critic_lr_scheduler"])
+#
+        #if self.config.normalize_values:
+        #    if state_dict["running_val_norm"] is not None: # todo: add running_val_norm in offline
+        #        self.running_val_norm.load_state_dict(state_dict["running_val_norm"])
+#
+        #if state_dict["episode_reward_meter"] is not None:
+        #    self.episode_reward_meter.load_state_dict(state_dict["episode_reward_meter"])
+#
+        #if state_dict["episode_length_meter"] is not None:
+        #    self.episode_length_meter.load_state_dict(state_dict["episode_length_meter"])
 
     def fit(self):
         self.env_reset()
@@ -499,6 +533,32 @@ class PPO:
 
         for c in self.eval_callbacks:
             actor_state = c.on_pre_eval_env_step(actor_state)
+
+        #log_dict = {
+        #    "IQL_vf" : self.vf({"obs": actor_inputs["obs"], "latents": actor_inputs["latents"]}),
+        #    "IQL_qf1": self.qf1({"obs": actor_inputs["obs"], "latents": actor_inputs["latents"], "actions": actor_state["actions"]}),
+        #    "IQL_qf2": self.qf2({"obs": actor_inputs["obs"], "latents": actor_inputs["latents"], "actions": actor_state["actions"]}),
+        #    "IQL_target_qf1": self.target_qf1(
+        #        {"obs": actor_inputs["obs"], "latents": actor_inputs["latents"], "actions": actor_state["actions"]}),
+        #    "IQL_target_qf2": self.target_qf2(
+        #        {"obs": actor_inputs["obs"], "latents": actor_inputs["latents"], "actions": actor_state["actions"]}),
+        #}
+
+        log_dict = {
+            "IQL_vf": self.vf({"obs": actor_inputs["obs"], "mimic_target_poses": actor_inputs["mimic_target_poses"]}),
+            "IQL_qf1": self.qf1(
+                {"obs": actor_inputs["obs"], "actions": actor_state["actions"], "mimic_target_poses": actor_inputs["mimic_target_poses"]}),
+            "IQL_qf2": self.qf2(
+                {"obs": actor_inputs["obs"], "actions": actor_state["actions"], "mimic_target_poses": actor_inputs["mimic_target_poses"]}),
+            "IQL_target_qf1": self.target_qf1(
+                {"obs": actor_inputs["obs"], "actions": actor_state["actions"], "mimic_target_poses": actor_inputs["mimic_target_poses"]}),
+            "IQL_target_qf2": self.target_qf2(
+                {"obs": actor_inputs["obs"], "actions": actor_state["actions"], "mimic_target_poses": actor_inputs["mimic_target_poses"]}),
+        }
+
+        self.fabric.log_dict(log_dict,step=self.step_count)
+
+        self.step_count += 1
 
         return actor_state
 

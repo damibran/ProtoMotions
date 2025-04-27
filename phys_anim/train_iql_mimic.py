@@ -92,7 +92,7 @@ def main(config: OmegaConf):
         latest_checkpoint = Path(fabric.loggers[0].root_dir) / "last.ckpt"
         if latest_checkpoint.exists():
             config.checkpoint = latest_checkpoint
-    #algo.load(config.checkpoint)
+    algo.load(config.checkpoint)
 
     save_dir = Path(fabric.loggers[0].log_dir)
     save_dir.mkdir(exist_ok=True, parents=True)
@@ -100,7 +100,8 @@ def main(config: OmegaConf):
     with open(save_dir / "config.yaml", "w") as file:
         OmegaConf.save(unresolved_conf, file)
 
-    algo.fit()
+    #algo.fit()
+    algo.dataset_eval()
 
 
 if __name__ == "__main__":

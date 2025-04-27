@@ -41,6 +41,8 @@ def build_mlp(config, num_in: int, num_out: int):
     layers = []
     for outdim in config.units:
         layers.append(init(nn.Linear(indim, outdim)))
+        if config.get("use_dropout", False):
+            layers.append(nn.Dropout(p=0.35))
         layers.append(model_utils.get_activation_func(config.activation))
         if config.use_layer_norm:
             layers.append(nn.LayerNorm(outdim))

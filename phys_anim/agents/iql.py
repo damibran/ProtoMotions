@@ -996,7 +996,11 @@ class IQL:
     def get_state_dict(self, state_dict):
         extra_state_dict = {
             "actor": self.actor.state_dict(),
-            "critic": self.target_qf1.state_dict(),
+            "target_qf1": self.target_qf1.state_dict(),
+            "target_qf2": self.target_qf2.state_dict(),
+            "qf1": self.qf1.state_dict(),
+            "qf2": self.qf2.state_dict(),
+            "vf": self.vf.state_dict(),
             "actor_optimizer": self.actor_optimizer.state_dict(),
             "critic_optimizer": self.qf1_optimizer.state_dict(),
             "epoch": self.current_epoch,

@@ -56,6 +56,8 @@ class IQL_Mimic:
 
         self.dataset_file = h5py.File(self.all_config.algo.config.dataset_file, "r")
 
+        self.eval_dataset_file = h5py.File(self.all_config.algo.config.eval_dataset_file, "r")
+
         self.dataset = {}
 
         self.dataset_len = self.dataset_file["obs"].shape[0]
@@ -69,11 +71,8 @@ class IQL_Mimic:
         env_ind = random.randint(0, num_envs - 1)
         for attr in self.all_config.algo.config.attribs_to_import:
             self.dataset[attr] = torch.from_numpy(self.dataset_file[attr][:,env_ind]).to(self.device)
-
-
-    def dataset_roll(self):
-        for key in self.dataset.keys():
-            self.dataset[key] = torch.roll(self.dataset[key], shifts=-self.config.batch_size)
+        self.dataset['next_obs'] = torch.roll(self.dataset["obs"], shifts=-1, dims=0)
+        self.dataset['next_targets'] = torch.roll(self.dataset["mimic_target_poses"], shifts=-1, dims=0)
 
     def setup(self):
         actor: PPO_Actor = instantiate(
@@ -137,9 +136,9 @@ class IQL_Mimic:
         self.policy_update_period = 1
         self.target_update_period = 1
 
-        state_dict = torch.load(Path.cwd() / "results/iql_mimic/lightning_logs/version_3/last.ckpt", map_location=self.device)
-        self.actor.load_state_dict(state_dict["actor"])
-        self.save(name="last_a.ckpt")
+        #state_dict = torch.load(Path.cwd() / "results/iql_mimic/lightning_logs/version_3/last.ckpt", map_location=self.device)
+        #self.actor.load_state_dict(state_dict["actor"])
+        #self.save(name="last_a.ckpt")
 
     def fit(self):
 
@@ -154,25 +153,31 @@ class IQL_Mimic:
             v_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             q1_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             q2_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
+            q_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_adw_neglog = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_adw = torch.zeros(self.update_steps_per_stage * batch_count)
+            a_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
+            v_pred_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
+            q_pred_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             for i in range(self.update_steps_per_stage):
                 for batch_id in range(batch_count):
 
-                    self.dataset_roll()
+                    indices = torch.randperm(len(self.dataset['obs']))[:self.config.batch_size]
 
                     batch = {
-                        "obs": self.dataset["obs"][0:self.config.batch_size],
-                        "mimic_target_poses": self.dataset["mimic_target_poses"][0:self.config.batch_size],
-                        "dones": self.dataset["dones"][0:self.config.batch_size],
-                        "actions": self.dataset["actions"][0:self.config.batch_size],
-                        "rewards": self.dataset["rewards"][0:self.config.batch_size],
+                        "obs": self.dataset["obs"][indices],
+                        "mimic_target_poses": self.dataset["mimic_target_poses"][indices],
+                        "dones": self.dataset["dones"][indices],
+                        "actions": self.dataset["actions"][indices],
+                        "rewards": self.dataset["rewards"][indices],
+                        'next_obs': self.dataset["next_obs"][indices],
+                        'next_targets': self.dataset["next_targets"][indices],
                     }
 
                     rewards = batch["rewards"]
 
-                    next_obs = torch.roll(batch["obs"], shifts=-1, dims=0)
-                    next_targets = torch.roll(batch["mimic_target_poses"], shifts=-1, dims=0)
+                    next_obs = batch["next_obs"]
+                    next_targets = batch["next_targets"]
 
                     """
                     QF Loss
@@ -188,6 +193,8 @@ class IQL_Mimic:
                     qf1_loss = self.qf_criterion(q1_pred, q_target)
                     qf2_loss = self.qf_criterion(q2_pred, q_target)
 
+                    qf_loss = (qf1_loss + qf2_loss) / 2
+
                     """
                     VF Loss
                     """
@@ -198,10 +205,12 @@ class IQL_Mimic:
                          "mimic_target_poses": batch["mimic_target_poses"]}),
                     ).detach()
                     vf_pred = self.vf({"obs": batch["obs"], "mimic_target_poses": batch["mimic_target_poses"]})
-                    vf_err = vf_pred - q_pred
-                    vf_sign = (vf_err > 0).float()
-                    vf_weight = (1 - vf_sign) * self.expectile + vf_sign * (1 - self.expectile)
-                    vf_loss = (vf_weight * (vf_err ** 2)).mean()
+                    #vf_err = vf_pred - q_pred
+                    #vf_sign = (vf_err > 0).float()
+                    #vf_weight = (1 - vf_sign) * self.expectile + vf_sign * (1 - self.expectile)
+                    #vf_loss = (vf_weight * (vf_err ** 2)).mean()
+                    vf_err = q_pred - vf_pred
+                    vf_loss = torch.mean(torch.abs(self.expectile - (vf_err < 0).float()) * vf_err ** 2)
 
                     """
                     Policy Loss
@@ -226,11 +235,9 @@ class IQL_Mimic:
                     """
                     if self._n_train_steps_total % self.q_update_period == 0:
                         self.qf1_optimizer.zero_grad()
-                        qf1_loss.backward()
-                        self.qf1_optimizer.step()
-
                         self.qf2_optimizer.zero_grad()
-                        qf2_loss.backward()
+                        qf_loss.backward()
+                        self.qf1_optimizer.step()
                         self.qf2_optimizer.step()
 
                         self.vf_optimizer.zero_grad()
@@ -259,15 +266,23 @@ class IQL_Mimic:
                     q1_loss_tensor[batch_id * self.update_steps_per_stage + i] = qf1_loss.mean().detach()
                     q2_loss_tensor[batch_id * self.update_steps_per_stage + i] = qf2_loss.mean().detach()
                     v_loss_tensor[batch_id * self.update_steps_per_stage + i] = vf_loss.mean().detach()
-                    a_loss_tensor_adw[batch_id * self.update_steps_per_stage + i] = policy_loss.mean().detach()
+                    a_loss_tensor[batch_id * self.update_steps_per_stage + i] = policy_loss.mean().detach()
                     a_loss_tensor_adw_neglog[batch_id * self.update_steps_per_stage + i] = actor_out["neglogp"].mean().detach()
+                    a_loss_tensor_adw[batch_id * self.update_steps_per_stage + i] = weights.mean().detach()
+                    q_pred_tensor[batch_id * self.update_steps_per_stage + i] = q_pred.mean().detach()
+                    v_pred_tensor[batch_id * self.update_steps_per_stage + i] = vf_pred.mean().detach()
+                    q_loss_tensor[batch_id * self.update_steps_per_stage + i] = qf_loss.mean().detach()
 
 
             self.log_dict.update({"ac/v_loss": v_loss_tensor.mean()})
             self.log_dict.update({"ac/q1_loss": q1_loss_tensor.mean()})
             self.log_dict.update({"ac/q2_loss": q2_loss_tensor.mean()})
+            self.log_dict.update({"ac/q_loss": q_loss_tensor.mean()})
+            self.log_dict.update({"ac/q_pred": q_pred_tensor.mean()})
+            self.log_dict.update({"ac/v_pred": v_pred_tensor.mean()})
             self.log_dict.update({"actor_loss/neg_log": a_loss_tensor_adw_neglog.mean()})
-            self.log_dict.update({"actor_loss/loss_adw": a_loss_tensor_adw.mean()})
+            self.log_dict.update({"actor_loss/adw": a_loss_tensor_adw.mean()})
+            self.log_dict.update({"actor_loss/loss": a_loss_tensor.mean()})
 
             self.fabric.log_dict(self.log_dict, self.current_epoch)
 
@@ -310,7 +325,7 @@ class IQL_Mimic:
             "actor_optimizer": self.actor_optimizer.state_dict(),
             "critic_optimizer": self.vf_optimizer.state_dict(),
             "q1_optimizer": self.qf1_optimizer.state_dict(),
-            "q2_optimizer": self.qf2_optimizer.state_dict(),
+            "q2_optimizer": self.qf1_optimizer.state_dict(),
             "epoch": self.current_epoch,
             "episode_reward_meter": None,
             "episode_length_meter": None,
@@ -329,6 +344,104 @@ class IQL_Mimic:
         save_dir = Path.cwd() / Path(path)
         state_dict = self.get_state_dict({})
         self.fabric.save(save_dir / name, state_dict)
+
+    def load(self, checkpoint: Path):
+        if checkpoint is not None:
+            checkpoint = Path(checkpoint).resolve()
+            print(f"Loading model from checkpoint: {checkpoint}")
+            state_dict = torch.load(checkpoint, map_location=self.device)
+            self.load_parameters(state_dict)
+
+    def load_parameters(self, state_dict):
+        self.current_epoch = state_dict["epoch"]
+        self.best_evaluated_score = state_dict.get("best_evaluated_score", None)
+
+        self.actor.load_state_dict(state_dict["actor"])
+
+        self.target_qf1.load_state_dict(state_dict["q1_target"])
+        self.target_qf2.load_state_dict(state_dict["q1_target"])
+        self.qf1.load_state_dict(state_dict["q1"])
+        self.qf2.load_state_dict(state_dict["q2"])
+        self.vf.load_state_dict(state_dict["critic"])
+
+    def dataset_eval(self):
+        print(self.dataset_file['obs'].shape)
+        env_id = 0
+        for step in range(self.dataset_file['obs'].shape[0]):
+            batch = {
+                'obs' : torch.from_numpy(self.dataset_file['obs'][step][env_id]).to(self.device).unsqueeze(0),
+                'mimic_target_poses': torch.from_numpy(self.dataset_file['mimic_target_poses'][step][env_id]).to(self.device).unsqueeze(0),
+                'actions': torch.from_numpy(self.dataset_file['actions'][step][env_id]).to(self.device).unsqueeze(0),
+            }
+            actor_out = self.actor.training_forward({"obs": batch["obs"], "actions": batch["actions"],
+                                     "mimic_target_poses": batch["mimic_target_poses"]})
+            vf = self.vf({"obs": batch["obs"], "mimic_target_poses": batch["mimic_target_poses"]})
+            qf1 = self.qf1(
+                {"obs": batch["obs"], "actions": batch["actions"],
+                 "mimic_target_poses": batch["mimic_target_poses"]})
+            qf2 = self.qf2(
+                {"obs": batch["obs"], "actions": batch["actions"],
+                 "mimic_target_poses": batch["mimic_target_poses"]})
+            target_qf1 = self.target_qf1(
+                {"obs": batch["obs"], "actions": batch["actions"],
+                 "mimic_target_poses": batch["mimic_target_poses"]})
+            target_qf2 = self.target_qf2(
+                {"obs": batch["obs"], "actions": batch["actions"],
+                 "mimic_target_poses": batch["mimic_target_poses"]})
+
+            qf1_p = self.qf1(
+                {"obs": batch["obs"], "actions": actor_out['mus'],
+                 "mimic_target_poses": batch["mimic_target_poses"]})
+            qf2_p = self.qf2(
+                {"obs": batch["obs"], "actions": actor_out['mus'],
+                 "mimic_target_poses": batch["mimic_target_poses"]})
+            target_qf1_p = self.target_qf1(
+                {"obs": batch["obs"], "actions": actor_out['mus'],
+                 "mimic_target_poses": batch["mimic_target_poses"]})
+            target_qf2_p = self.target_qf2(
+                {"obs": batch["obs"], "actions": actor_out['mus'],
+                 "mimic_target_poses": batch["mimic_target_poses"]})
+
+            action_dif = torch.norm(batch['actions']-actor_out['mus'])
+
+            q1_dif = qf1 - qf1_p
+            q2_dif = qf2 - qf2_p
+
+            # Generate action tensors that change gradually over steps
+            action1 = torch.full_like(batch["actions"], step / self.dataset_file['obs'].shape[0])  # From 0 to 1
+            action2 = torch.full_like(batch["actions"], -step / self.dataset_file['obs'].shape[0])  # From 0 to -1
+
+            # Pass both to qf1
+            qf1_action1 = self.qf1(
+                {"obs": batch["obs"], "actions": action1, "mimic_target_poses": batch["mimic_target_poses"]})
+            qf1_action2 = self.qf1(
+                {"obs": batch["obs"], "actions": action2, "mimic_target_poses": batch["mimic_target_poses"]})
+
+            # Compute the difference
+            difference = qf1_action1 - qf1_action2
+
+            log_dict = {
+                "neglogp" : actor_out["neglogp"].mean(),
+                "vf": vf,
+                "qf1": qf1,
+                "qf2": qf2,
+                "target_qf1": target_qf1,
+                "target_qf2": target_qf2,
+                "qf1_p": qf1_p,
+                "qf2_p": qf2_p,
+                "target_qf1_p": target_qf1_p,
+                "target_qf2_p": target_qf2_p,
+                'mus_mean': actor_out['mus'].mean(),
+                'actions_mean': batch['actions'].mean(),
+                'action_dif': action_dif,
+                'q1_dif': q1_dif,
+                'q2_dif': q2_dif,
+                'random_dif':difference
+            }
+
+            self.fabric.log_dict(log_dict, env_id*self.dataset_file['obs'].shape[1] + step)
+
+
 
     @staticmethod
     def disc_loss_neg(disc_logits) -> Tensor:

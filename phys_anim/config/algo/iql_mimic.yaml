@@ -7,6 +7,8 @@ algo:
 
     dataset_file: output/recordings/mimic_combo_train/dataset.hdf5
 
+    eval_dataset_file: output/recordings/mimic_combo_eval/dataset.hdf5
+
     attribs_to_import:
       - obs
       - mimic_target_poses
@@ -57,6 +59,7 @@ algo:
         initializer: default
         units: [1024, 1024, 1024]
         activation: relu
+        use_dropout: True
         normalize_obs: ${algo.config.normalize_obs}
         obs_clamp_value: ${algo.config.obs_clamp_value}
         use_layer_norm: False
@@ -73,6 +76,7 @@ algo:
         normalize_obs: ${algo.config.normalize_obs}
         obs_clamp_value: ${algo.config.obs_clamp_value}
         use_layer_norm: False
+        use_dropout: True
         extra_inputs:
           actions:
             _target_: phys_anim.agents.models.common.Flatten
@@ -98,12 +102,12 @@ algo:
 
     #IQL parameters
     expectile: 0.7
-    alpha: 0.005
-    batch_size: 256
+    alpha: 1
+    batch_size: 16384
     max_epochs: 10000
     normalize_obs: True
     obs_clamp_value: null
-    discount: 0.99
+    discount: 0.1
     beta: 3 # aka temperatue
 
     eval_callbacks: null
