@@ -293,14 +293,7 @@ class IQL:
                                         )
         self.dataset['actions'] = actions
         self.dataset['dones'] = torch.from_numpy(file_rand['dones'][:, env_rand, ...]).to(self.device)
-
-    def dataset_roll(self):
-
-        for key in self.demo_dataset.keys():
-            self.demo_dataset[key] = torch.roll(self.demo_dataset[key], shifts=-self.config.batch_size)
-
-        for key in self.dataset.keys():
-            self.dataset[key] = torch.roll(self.dataset[key], shifts=-self.config.batch_size)
+        self.dataset['next_human_obs'] = torch.roll(self.dataset["human_obs"], shifts=-1, dims=0)
 
     def setup(self):
         actor: PPO_Actor = instantiate(
@@ -411,30 +404,33 @@ class IQL:
             for i in range(self.update_steps_per_stage):
                 for batch_id in range(batch_count):
 
-                    self.dataset_roll()
+                    indices = torch.randperm(len(self.dataset['human_obs']))[:self.config.batch_size]
 
                     batch = {
-                        "latents": self.dataset["latents"][0:self.config.batch_size],
-                        "root_pos": self.dataset["root_pos"][0:self.config.batch_size],
-                        "root_rot": self.dataset["root_rot"][0:self.config.batch_size],
-                        "root_vel": self.dataset["root_vel"][0:self.config.batch_size],
-                        "root_ang_vel": self.dataset["root_ang_vel"][0:self.config.batch_size],
-                        "dof_pos": self.dataset["dof_pos"][0:self.config.batch_size],
-                        "dof_vel": self.dataset["dof_vel"][0:self.config.batch_size],
-                        "dof_vel": self.dataset["dof_vel"][0:self.config.batch_size],
-                        "key_body_pos": self.dataset["key_body_pos"][0:self.config.batch_size],
-                        "disc_obs": self.dataset["disc_obs"][0:self.config.batch_size],
-                        "human_obs": self.dataset["human_obs"][0:self.config.batch_size],
-                        "actions": self.dataset["actions"][0:self.config.batch_size],
-                        'dones': self.dataset['dones'][0:self.config.batch_size]
+                        "latents": self.dataset["latents"][indices],
+                        "root_pos": self.dataset["root_pos"][indices],
+                        "root_rot": self.dataset["root_rot"][indices],
+                        "root_vel": self.dataset["root_vel"][indices],
+                        "root_ang_vel": self.dataset["root_ang_vel"][indices],
+                        "dof_pos": self.dataset["dof_pos"][indices],
+                        "dof_vel": self.dataset["dof_vel"][indices],
+                        "dof_vel": self.dataset["dof_vel"][indices],
+                        "key_body_pos": self.dataset["key_body_pos"][indices],
+                        "disc_obs": self.dataset["disc_obs"][indices],
+                        "human_obs": self.dataset["human_obs"][indices],
+                        "actions": self.dataset["actions"][indices],
+                        'next_human_obs': self.dataset["next_human_obs"][indices],
+                        'dones': self.dataset['dones'][indices]
                     }
+
+                    demo_indices = torch.randperm(len(self.demo_dataset['disc_obs']))[:self.config.batch_size]
 
                     demo_batch = {
-                        "disc_obs": self.demo_dataset["disc_obs"][0:self.config.batch_size],
-                        "actions": self.demo_dataset["actions"][0:self.config.batch_size]
+                        "disc_obs": self.demo_dataset["disc_obs"][demo_indices],
+                        "actions": self.demo_dataset["actions"][demo_indices]
                     }
 
-                    next_obs = torch.roll(batch["human_obs"], shifts=-1, dims=0)
+                    next_obs = batch["next_human_obs"]
                     next_latents = torch.roll(batch["latents"], shifts=-1, dims=0)
 
 
