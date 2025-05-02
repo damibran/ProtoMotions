@@ -6,6 +6,8 @@ from poselib.skeleton.skeleton3d import SkeletonMotion, SkeletonState, SkeletonT
 from poselib.core.rotation3d import quat_angle_axis, quat_inverse, quat_mul_norm
 from isaac_utils import rotations, torch_utils
 import h5py
+from phys_anim.envs.humanoid.humanoid_utils import build_disc_action_observations, compute_humanoid_observations_max
+
 
 # jp hack
 # get rid of this ASAP, need a proper way of projecting from max coords to reduced coord
@@ -102,23 +104,33 @@ def _compute_motion_dof_vels(dof_body_ids,dof_offsets, num_dof, device,motion: S
 
 skeleton_tree = SkeletonTree.from_mjcf('phys_anim/data/assets/mjcf/amp_humanoid_sword_shield.xml')
 
-motion_names = [
-    'RL_Avatar_Atk_2xCombo01_Motion',
-    'RL_Avatar_Atk_Kick_Motion',
-    'RL_Avatar_Atk_ShieldSwipe01_Motion',
-    'RL_Avatar_Counter_Atk03_Motion',
-    'RL_Avatar_Idle_Ready_Motion',
-    'RL_Avatar_RunBackward_Motion',
-    'RL_Avatar_RunForward_Motion',
-    'RL_Avatar_RunLeft_Motion',
-    'RL_Avatar_RunRight_Motion',
-    'RL_Avatar_TurnLeft90_Motion',
-    'RL_Avatar_TurnLeft180_Motion',
-    'RL_Avatar_TurnRight90_Motion',
-    'RL_Avatar_TurnRight180_Motion',
+demo_dataset_files_paths = [
+    'output/recordings/mimic_train_iql/RL_Avatar_Atk_2xCombo01_Motion/dataset.hdf5',
+    'output/recordings/mimic_train_iql/RL_Avatar_Atk_Kick_Motion/dataset.hdf5',
+    'output/recordings/mimic_train_iql/RL_Avatar_Atk_ShieldSwipe01_Motion/dataset.hdf5',
+    'output/recordings/mimic_train_iql/RL_Avatar_Counter_Atk03_Motion/dataset.hdf5',
+    'output/recordings/mimic_train_iql/RL_Avatar_Idle_Ready_Motion/dataset.hdf5',
+    'output/recordings/mimic_train_iql/RL_Avatar_RunBackward_Motion/dataset.hdf5',
+    'output/recordings/mimic_train_iql/RL_Avatar_RunForward_Motion/dataset.hdf5',
+    'output/recordings/mimic_train_iql/RL_Avatar_RunLeft_Motion/dataset.hdf5',
+    'output/recordings/mimic_train_iql/RL_Avatar_RunRight_Motion/dataset.hdf5',
+    'output/recordings/mimic_train_iql/RL_Avatar_TurnLeft90_Motion/dataset.hdf5',
+    'output/recordings/mimic_train_iql/RL_Avatar_TurnLeft180_Motion/dataset.hdf5',
+    'output/recordings/mimic_train_iql/RL_Avatar_TurnRight90_Motion/dataset.hdf5',
+    'output/recordings/mimic_train_iql/RL_Avatar_TurnRight180_Motion/dataset.hdf5',
 ]
 
-root_dir = 'output/recordings/mimic_train'
+num_act = 31
+hum_num_obs = 253
+
+demo_dataset_files = []
+for path in demo_dataset_files_paths:
+    file = h5py.File(path, "r+")
+    demo_dataset_files.append(file)
+    num_steps = file['dones'].shape[0]
+    num_envs = file['dones'].shape[1]
+    file.create_dataset("dof_pos", (num_steps, num_envs, num_act))
+    file.create_dataset("human_obs", (num_steps, num_envs, hum_num_obs))
 
 dfs_dof_body_ids = [ 1, 2, 3, 4, 5, 7, 8, 11, 12, 13, 14, 15, 16 ] #all_config.robot.dfs_dof_body_ids
 dfs_dof_names = ['abdomen_x', 'abdomen_y', 'abdomen_z', 'neck_x', 'neck_y', 'neck_z',
@@ -128,7 +140,6 @@ dfs_dof_names = ['abdomen_x', 'abdomen_y', 'abdomen_z', 'neck_x', 'neck_y', 'nec
                  'right_knee', 'right_ankle_x', 'right_ankle_y', 'right_ankle_z', 'left_hip_x',
                  'left_hip_y', 'left_hip_z', 'left_knee', 'left_ankle_x', 'left_ankle_y',
                  'left_ankle_z'] #all_config.robot.dfs_dof_names
-num_act = 31
 
 dof_offsets = []
 previous_dof_name = "null"
@@ -138,12 +149,10 @@ for dof_offset, dof_name in enumerate(dfs_dof_names):
         dof_offsets.append(dof_offset)
 dof_offsets.append(len(dfs_dof_names))
 
-for motion_name in motion_names:
-    file_path = os.getcwd() + '/' + root_dir + '/' + motion_name + '/' + 'dataset.hdf5'
-    file = h5py.File(file_path, 'r+')
-    file.create_dataset('dof_vel',
-                        (file['global_rot'].shape[0],file['global_rot'].shape[1], num_act))
-    for env_id in range(file['global_rot'].shape[1]):
+device = 'cpu'
+
+for file in demo_dataset_files:
+    for env_id in range(file['dones'].shape[1]):
         global_rot = torch.from_numpy(file['global_rot'][:, env_id, ...])
         root_pos = torch.from_numpy(file['root_pos'][:, env_id, ...])
         sk_state = SkeletonState.from_rotation_and_root_translation(
@@ -153,10 +162,25 @@ for motion_name in motion_names:
             is_local=False
         )
         sk_motion = SkeletonMotion.from_skeleton_state(sk_state, 30)
-        dof_vel = _compute_motion_dof_vels(dof_body_ids=dfs_dof_body_ids,
+        root_pos = sk_motion.root_translation.to(device)
+        root_rot = sk_motion.global_root_rotation.to(device)
+        root_vel = sk_motion.global_root_velocity.to(device)
+        root_ang_vel = sk_motion.global_root_angular_velocity.to(device)
+        dof_pos = _local_rotation_to_dof(dof_body_ids=dfs_dof_body_ids,
                                          dof_offsets=dof_offsets,
                                          num_dof=num_act,
-                                         device='cpu',
-                                         motion=sk_motion)
-        file['dof_vel'][:, env_id] = dof_vel
-    file.close()
+                                         device=device,
+                                         local_rot=sk_motion.local_rotation,
+                                         joint_3d_format='exp_map', ).to(device)
+        human_obs = compute_humanoid_observations_max(
+            sk_motion.global_translation.to(device),
+            sk_motion.global_rotation.to(device),
+            sk_motion.global_velocity.to(device),
+            sk_motion.global_angular_velocity.to(device),
+            torch.zeros(1, device=device),
+            True,
+            True,
+            True,
+        )
+        file['dof_pos'][:, env_id] = dof_pos
+        file['human_obs'][:, env_id] = human_obs

@@ -233,7 +233,23 @@ class IQL:
         self.dataset['dof_pos'] = self.make_with_hist_obs(dof_pos, flatten=False)
         self.dataset['dof_vel'] = self.make_with_hist_obs(dof_vel, flatten=False)
         self.dataset['key_body_pos'] = self.make_with_hist_obs(key_body_pos, flatten=False)
-        disc_obs = torch.from_numpy(file_rand['disc_obs'][:, env_rand, ...]).to(self.device)
+        disc_obs = build_disc_action_observations(
+                                            root_pos,
+                                            root_rot,
+                                            root_vel,
+                                            root_ang_vel,
+                                            dof_pos,
+                                            dof_vel,
+                                            key_body_pos,
+                                            torch.zeros(1, device=self.device),
+                                            actions,
+                                            self.all_config.env.config.humanoid_obs.local_root_obs,
+                                            self.all_config.env.config.humanoid_obs.root_height_obs,
+                                            self.all_config.robot.dof_obs_size,
+                                            self.dof_offsets,
+                                            False,
+                                            self.w_last,
+                                        )
         self.dataset['disc_obs'] = self.make_with_hist_obs(disc_obs)
         human_obs = compute_humanoid_observations_max(
                                             sk_motion.global_translation.to(self.device),
@@ -249,6 +265,7 @@ class IQL:
         self.dataset['actions'] = actions
         self.dataset['dones'] = torch.from_numpy(file_rand['dones'][:, env_rand, ...]).to(self.device)
         self.dataset['next_human_obs'] = torch.roll(human_obs, shifts=-1, dims=0)
+
 
     def setup(self):
         actor: PPO_Actor = instantiate(
