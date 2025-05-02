@@ -145,6 +145,7 @@ class IQL:
         self.discriminator_obs_size_per_step = (
             self.all_config.env.config.discriminator_obs_size_per_step
         )
+        self.hist_obs = self.all_config.env.config.discriminator_obs_historical_steps
         self.disc_obs_size = (self.discriminator_obs_size_per_step
                                * self.all_config.env.config.discriminator_obs_historical_steps)
 
@@ -187,51 +188,19 @@ class IQL:
 
     def fill_dataset(self):
         filled = 0
+        demo_disc_obs = []
+        demo_actions = []
         while filled < self.dataset_len:
             file_rand = random.choice(self.demo_dataset_files)
-            global_rot = torch.from_numpy(file_rand['global_rot'][:,0,...])
-            root_pos = torch.from_numpy(file_rand['root_pos'][:,0,...])
-            sk_state = SkeletonState.from_rotation_and_root_translation(
-                self.skeleton_tree,
-                global_rot,
-                root_pos,
-                is_local=False
-            )
-            sk_motion = SkeletonMotion.from_skeleton_state(sk_state,30)
-            dataset_end = np.clip(filled + len(sk_motion), 0,self.dataset_len)
-            motion_end = np.clip(self.dataset_len - len(sk_motion), 0, len(sk_motion))
-            root_pos = sk_motion.root_translation[0:motion_end].to(self.device)
-            root_rot = sk_motion.global_root_rotation[0:motion_end].to(self.device)
-            root_vel = sk_motion.global_root_velocity[0:motion_end].to(self.device)
-            root_ang_vel = sk_motion.global_root_angular_velocity[0:motion_end].to(self.device)
-            dof_pos = _local_rotation_to_dof(dof_body_ids=self.dof_body_ids,
-                                             dof_offsets=self.dof_offsets,
-                                             num_dof=self.num_act,
-                                             device=self.device,
-                                             local_rot=sk_motion.local_rotation,
-                                             joint_3d_format='exp_map',).to(self.device)
-            dof_vel = torch.from_numpy(file_rand['dof_vel'][0:motion_end]).to(self.device)
-            key_body_pos = sk_motion.global_translation[0:motion_end, self.key_body_ids].to(self.device)
+            motion_end = min(self.dataset_len - filled, file_rand['actions'].shape[0])
             actions = torch.from_numpy(file_rand['actions'][0:motion_end,0,...]).to(self.device)
-            self.demo_dataset['disc_obs'] = self.make_disc_with_hist_obs(build_disc_action_observations(
-                                            root_pos,
-                                            root_rot,
-                                            root_vel,
-                                            root_ang_vel,
-                                            dof_pos,
-                                            dof_vel,
-                                            key_body_pos,
-                                            torch.zeros(1, device=self.device),
-                                            actions,
-                                            self.all_config.env.config.humanoid_obs.local_root_obs,
-                                            self.all_config.env.config.humanoid_obs.root_height_obs,
-                                            self.all_config.robot.dof_obs_size,
-                                            self.dof_offsets,
-                                            False,
-                                            self.w_last,
-                                        ))
-            self.dataset['actions'] = actions
-            filled += dataset_end
+            disc_obs = torch.from_numpy(file_rand['disc_obs'][0:motion_end,0,...]).to(self.device)
+            demo_disc_obs.append(self.make_with_hist_obs(disc_obs))
+            demo_actions.append(actions)
+            filled += motion_end
+
+        self.demo_dataset['disc_obs'] = torch.cat(demo_disc_obs, dim=0)
+        self.demo_dataset['actions'] = torch.cat(demo_actions, dim=0)
 
         file_rand = random.choice(self.dataset_files)
         env_rand = random.randint(0,file_rand['global_rot'].shape[1] - 1)
@@ -257,31 +226,16 @@ class IQL:
         dof_vel = torch.from_numpy(file_rand['dof_vel'][:, env_rand, ...]).to(self.device)
         key_body_pos = sk_motion.global_translation[:, self.key_body_ids].to(self.device)
         actions = torch.from_numpy(file_rand['actions'][:, env_rand, ...]).to(self.device)
-        self.dataset['root_pos'] = root_pos
-        self.dataset['root_rot'] = root_rot
-        self.dataset['root_vel'] = root_vel
-        self.dataset['root_ang_vel'] = root_ang_vel
-        self.dataset['dof_pos'] = dof_pos
-        self.dataset['dof_vel'] = dof_vel
-        self.dataset['key_body_pos'] = key_body_pos
-        self.dataset['disc_obs'] = self.make_disc_with_hist_obs(build_disc_action_observations(
-                                            root_pos,
-                                            root_rot,
-                                            root_vel,
-                                            root_ang_vel,
-                                            dof_pos,
-                                            dof_vel,
-                                            key_body_pos,
-                                            torch.zeros(1, device=self.device),
-                                            actions,
-                                            self.all_config.env.config.humanoid_obs.local_root_obs,
-                                            self.all_config.env.config.humanoid_obs.root_height_obs,
-                                            self.all_config.robot.dof_obs_size,
-                                            self.dof_offsets,
-                                            False,
-                                            self.w_last,
-                                        ))
-        self.dataset['human_obs'] = compute_humanoid_observations_max(
+        self.dataset['root_pos'] = self.make_with_hist_obs(root_pos, flatten=False)
+        self.dataset['root_rot'] = self.make_with_hist_obs(root_rot, flatten=False)
+        self.dataset['root_vel'] = self.make_with_hist_obs(root_vel, flatten=False)
+        self.dataset['root_ang_vel'] = self.make_with_hist_obs(root_ang_vel, flatten=False)
+        self.dataset['dof_pos'] = self.make_with_hist_obs(dof_pos, flatten=False)
+        self.dataset['dof_vel'] = self.make_with_hist_obs(dof_vel, flatten=False)
+        self.dataset['key_body_pos'] = self.make_with_hist_obs(key_body_pos, flatten=False)
+        disc_obs = torch.from_numpy(file_rand['disc_obs'][:, env_rand, ...]).to(self.device)
+        self.dataset['disc_obs'] = self.make_with_hist_obs(disc_obs)
+        human_obs = compute_humanoid_observations_max(
                                             sk_motion.global_translation.to(self.device),
                                             sk_motion.global_rotation.to(self.device),
                                             sk_motion.global_velocity.to(self.device),
@@ -291,9 +245,10 @@ class IQL:
                                             self.all_config.env.config.humanoid_obs.root_height_obs,
                                             self.w_last,
                                         )
+        self.dataset['human_obs'] = self.make_with_hist_obs(human_obs, flatten=False)
         self.dataset['actions'] = actions
         self.dataset['dones'] = torch.from_numpy(file_rand['dones'][:, env_rand, ...]).to(self.device)
-        self.dataset['next_human_obs'] = torch.roll(self.dataset["human_obs"], shifts=-1, dims=0)
+        self.dataset['next_human_obs'] = torch.roll(human_obs, shifts=-1, dims=0)
 
     def setup(self):
         actor: PPO_Actor = instantiate(
@@ -382,10 +337,9 @@ class IQL:
             print(f"Epoch: {self.current_epoch}")
             batch_count = math.ceil(self.dataset_len / self.config.batch_size)
 
+            print('Fill Dataset')
             self.fill_dataset()
             self.dataset["latents"] = self.sample_latent(self.dataset_len)
-
-            print(f'Value Step')
 
             v_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
             q_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
@@ -400,9 +354,9 @@ class IQL:
             a_loss_tensor_div = torch.zeros(self.update_steps_per_stage * batch_count)
             a_loss_tensor_total = torch.zeros(self.update_steps_per_stage * batch_count)
 
-
             for i in range(self.update_steps_per_stage):
                 for batch_id in range(batch_count):
+                    print(f'Batch: {batch_id}')
 
                     indices = torch.randperm(len(self.dataset['human_obs']))[:self.config.batch_size]
 
@@ -443,9 +397,10 @@ class IQL:
                     """
                     QF Loss
                     """
-                    q1_pred = self.qf1({"obs": batch["human_obs"], "actions": batch["actions"],
+                    print("Q step")
+                    q1_pred = self.qf1({"obs": batch["human_obs"][:, 0], "actions": batch["actions"],
                          "latents": batch["latents"]})
-                    q2_pred = self.qf2({"obs": batch["human_obs"], "actions": batch["actions"],
+                    q2_pred = self.qf2({"obs": batch["human_obs"][:, 0], "actions": batch["actions"],
                          "latents": batch["latents"]})
                     target_vf_pred = self.vf({"obs": next_obs, "latents": next_latents}).detach()
 
@@ -457,13 +412,14 @@ class IQL:
                     """
                     VF Loss
                     """
+                    print("V step")
                     q_pred = torch.min(
-                        self.target_qf1({"obs": batch["human_obs"], "actions": batch["actions"],
+                        self.target_qf1({"obs": batch["human_obs"][:, 0], "actions": batch["actions"],
                          "latents": batch["latents"]}),
-                        self.target_qf2({"obs": batch["human_obs"], "actions": batch["actions"],
+                        self.target_qf2({"obs": batch["human_obs"][:, 0], "actions": batch["actions"],
                          "latents": batch["latents"]}),
                     ).detach()
-                    vf_pred = self.vf({"obs": batch["human_obs"], "latents": batch["latents"]})
+                    vf_pred = self.vf({"obs": batch["human_obs"][:, 0], "latents": batch["latents"]})
                     vf_err = vf_pred - q_pred
                     vf_sign = (vf_err > 0).float()
                     vf_weight = (1 - vf_sign) * self.expectile + vf_sign * (1 - self.expectile)
@@ -472,9 +428,10 @@ class IQL:
                     """
                     Policy Loss
                     """
+                    print("P step")
                     self.actor.training = True
                     actor_out = self.actor.training_forward(
-                        {"obs": batch["human_obs"],
+                        {"obs": batch["human_obs"][:,0],
                          "actions": batch["actions"],
                          "latents": batch["latents"]})
 
@@ -488,7 +445,7 @@ class IQL:
                     actor_adw_loss = (-policy_logpp * weights).mean()
 
                     actor_div_loss, div_loss_log = self.calculate_extra_actor_loss(
-                        {"obs": batch["human_obs"], "latents": batch["latents"],
+                        {"obs": batch["human_obs"][:,0], "latents": batch["latents"],
                          "actions": batch["actions"]})
 
                     actor_loss = actor_adw_loss + actor_div_loss
@@ -496,20 +453,30 @@ class IQL:
                     """
                     Disc Step
                     """
+                    print("D step")
+                    latents = self.make_with_hist_obs(batch["latents"] ,flatten=False).reshape(self.config.batch_size * self.hist_obs, -1)
 
                     self.actor.training = False
                     with torch.no_grad():
                         actor_eval_out = self.actor.eval_forward(
-                            {"obs": batch["human_obs"], "latents": batch["latents"]})
+                            {"obs": batch["human_obs"].view(self.config.batch_size * self.hist_obs, -1), "latents": latents})
+
+                    root_pos = batch["root_pos"].view(self.config.batch_size * self.hist_obs, -1)
+                    root_rot = batch["root_rot"].view(self.config.batch_size * self.hist_obs, -1)
+                    root_vel = batch["root_vel"].view(self.config.batch_size * self.hist_obs, -1)
+                    root_ang_vel = batch["root_ang_vel"].view(self.config.batch_size * self.hist_obs, -1)
+                    dof_pos = batch["dof_pos"].view(self.config.batch_size * self.hist_obs, -1)
+                    dof_vel = batch["dof_vel"].view(self.config.batch_size * self.hist_obs, -1)
+                    key_body_pos = batch["key_body_pos"].view(self.config.batch_size * self.hist_obs, 2, 3)
 
                     agent_disc_obs = build_disc_action_observations(
-                        batch["root_pos"],
-                        batch["root_rot"],
-                        batch["root_vel"],
-                        batch["root_ang_vel"],
-                        batch["dof_pos"],
-                        batch["dof_vel"],
-                        batch["key_body_pos"],
+                        root_pos,
+                        root_rot,
+                        root_vel,
+                        root_ang_vel,
+                        dof_pos,
+                        dof_vel,
+                        key_body_pos,
                         torch.zeros(1, device=self.device),
                         actor_eval_out["actions"],
                         self.all_config.env.config.humanoid_obs.local_root_obs,
@@ -520,8 +487,8 @@ class IQL:
                         self.w_last,
                     )
 
-                    agent_disc_obs = self.make_disc_with_hist_obs(agent_disc_obs, torch.zeros(agent_disc_obs.shape[0],
-                                                                                              device=self.device))
+                    agent_disc_obs = agent_disc_obs.view(self.config.batch_size, self.hist_obs, -1)
+                    agent_disc_obs = agent_disc_obs.view(self.config.batch_size, -1)
 
                     disc_loss, disc_log_dict = self.encoder_step(
                         {"AgentDiscObs": agent_disc_obs, "DemoDiscObs": demo_batch["disc_obs"],
@@ -966,28 +933,35 @@ class IQL:
 
         return torch.cat(total_error, dim=-1)
 
-    def make_disc_with_hist_obs(self, dics_obs:torch.Tensor, reset:torch.Tensor = None):
-        disc_steps_len = dics_obs.shape[0]
+    def make_with_hist_obs(self, obs: torch.Tensor, flatten = True):
+        """
+        Constructs a tensor containing historical observations for each time step.
+
+        Args:
+            obs (torch.Tensor): Tensor of shape (N_steps, ...).
+            reset (torch.Tensor, optional): Unused in current logic.
+
+        Returns:
+            torch.Tensor: Tensor of shape (N_steps, hist_steps, ...) with historical context,
+                          or (N_steps, hist_steps * prod(obs.shape[1:])) if flattened.
+        """
+        N_steps = obs.shape[0]
         hist_steps = self.all_config.env.config.discriminator_obs_historical_steps
-        obs_size = self.discriminator_obs_size_per_step
+        obs_shape = obs.shape[1:]
 
-        padding = torch.zeros((hist_steps - 1, obs_size), device=self.device)
-        padded_obs = torch.cat([padding, dics_obs], dim=0)
+        # Padding with zeros in time dimension
+        padding = torch.zeros((hist_steps - 1, *obs_shape), device=obs.device, dtype=obs.dtype)
+        padded_obs = torch.cat([padding, obs], dim=0)  # Shape: (N_steps + hist_steps - 1, ...)
 
-        temp = torch.zeros((dics_obs.shape[0],
-                            self.all_config.env.config.discriminator_obs_historical_steps,
-                            self.discriminator_obs_size_per_step),
-                           device = self.device)
+        # Create indices to extract historical windows
+        indices = (torch.arange(N_steps, device=obs.device).unsqueeze(1) +
+                   torch.arange(hist_steps, device=obs.device).flip(0))  # Shape: (N_steps, hist_steps)
 
-        #for i in range(0, disc_steps_len):
-        #    for j in range(self.all_config.env.config.discriminator_obs_historical_steps):
-        #            temp[i, j] = padded_obs[i - j + hist_steps - 1]
+        # Gather the slices
+        temp = padded_obs[indices]  # Shape: (N_steps, hist_steps, ...)
 
-        indices = (torch.arange(disc_steps_len, device=self.device).unsqueeze(1) +
-                   torch.arange(hist_steps, device=self.device).flip(0))
-        temp = padded_obs[indices]
-
-        return temp.reshape(disc_steps_len,-1)
+        # Flatten the last two dimensions if needed
+        return temp.reshape(N_steps, -1) if flatten else temp  # Or return `temp` directly if not flattening
 
     def get_state_dict(self, state_dict):
         extra_state_dict = {

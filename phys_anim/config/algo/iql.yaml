@@ -4,34 +4,34 @@ algo:
   config:
 
     dataset_files:
-      - output/recordings/mimic_train/RL_Avatar_Atk_2xCombo01_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_Atk_Kick_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_Atk_ShieldSwipe01_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_Counter_Atk03_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_Idle_Ready_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_RunBackward_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_RunForward_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_RunLeft_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_RunRight_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_TurnLeft90_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_TurnLeft180_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_TurnRight90_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_TurnRight180_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_Atk_2xCombo01_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_Atk_Kick_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_Atk_ShieldSwipe01_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_Counter_Atk03_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_Idle_Ready_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_RunBackward_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_RunForward_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_RunLeft_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_RunRight_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_TurnLeft90_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_TurnLeft180_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_TurnRight90_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_TurnRight180_Motion/dataset.hdf5
 
     demo_dataset_files:
-      - output/recordings/mimic_eval/RL_Avatar_Atk_2xCombo01_Motion/dataset.hdf5
-      - output/recordings/mimic_eval/RL_Avatar_Atk_Kick_Motion/dataset.hdf5
-      - output/recordings/mimic_eval/RL_Avatar_Atk_ShieldSwipe01_Motion/dataset.hdf5
-      - output/recordings/mimic_eval/RL_Avatar_Counter_Atk03_Motion/dataset.hdf5
-      - output/recordings/mimic_eval/RL_Avatar_Idle_Ready_Motion/dataset.hdf5
-      - output/recordings/mimic_eval/RL_Avatar_RunBackward_Motion/dataset.hdf5
-      - output/recordings/mimic_eval/RL_Avatar_RunForward_Motion/dataset.hdf5
-      - output/recordings/mimic_eval/RL_Avatar_RunLeft_Motion/dataset.hdf5
-      - output/recordings/mimic_eval/RL_Avatar_RunRight_Motion/dataset.hdf5
-      - output/recordings/mimic_eval/RL_Avatar_TurnLeft90_Motion/dataset.hdf5
-      - output/recordings/mimic_eval/RL_Avatar_TurnLeft180_Motion/dataset.hdf5
-      - output/recordings/mimic_eval/RL_Avatar_TurnRight90_Motion/dataset.hdf5
-      - output/recordings/mimic_eval/RL_Avatar_TurnRight180_Motion/dataset.hdf5
+      - output/recordings/mimic_eval_iql/RL_Avatar_Atk_2xCombo01_Motion/dataset.hdf5
+      - output/recordings/mimic_eval_iql/RL_Avatar_Atk_Kick_Motion/dataset.hdf5
+      - output/recordings/mimic_eval_iql/RL_Avatar_Atk_ShieldSwipe01_Motion/dataset.hdf5
+      - output/recordings/mimic_eval_iql/RL_Avatar_Counter_Atk03_Motion/dataset.hdf5
+      - output/recordings/mimic_eval_iql/RL_Avatar_Idle_Ready_Motion/dataset.hdf5
+      - output/recordings/mimic_eval_iql/RL_Avatar_RunBackward_Motion/dataset.hdf5
+      - output/recordings/mimic_eval_iql/RL_Avatar_RunForward_Motion/dataset.hdf5
+      - output/recordings/mimic_eval_iql/RL_Avatar_RunLeft_Motion/dataset.hdf5
+      - output/recordings/mimic_eval_iql/RL_Avatar_RunRight_Motion/dataset.hdf5
+      - output/recordings/mimic_eval_iql/RL_Avatar_TurnLeft90_Motion/dataset.hdf5
+      - output/recordings/mimic_eval_iql/RL_Avatar_TurnLeft180_Motion/dataset.hdf5
+      - output/recordings/mimic_eval_iql/RL_Avatar_TurnRight90_Motion/dataset.hdf5
+      - output/recordings/mimic_eval_iql/RL_Avatar_TurnRight180_Motion/dataset.hdf5
 
     models:
       terrain_models:
