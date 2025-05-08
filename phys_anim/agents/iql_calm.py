@@ -743,9 +743,15 @@ class IQL_Calm:
     def get_state_dict(self, state_dict):
         extra_state_dict = {
             "actor": self.actor.state_dict(),
-            "critic": self.target_qf1.state_dict(),
+            "critic": self.vf.state_dict(),
+            "qf1": self.qf1.state_dict(),
+            "qf2": self.qf2.state_dict(),
+            "target_qf1": self.target_qf1.state_dict(),
+            "target_qf2": self.target_qf2.state_dict(),
             "actor_optimizer": self.actor_optimizer.state_dict(),
-            "critic_optimizer": self.qf1_optimizer.state_dict(),
+            "critic_optimizer": self.vf_optimizer.state_dict(),
+            "qf1_optimizer": self.qf1_optimizer.state_dict(),
+            "qf2_optimizer": self.qf2_optimizer.state_dict(),
             "epoch": self.current_epoch,
             "episode_reward_meter": None,
             "episode_length_meter": None,
@@ -758,6 +764,13 @@ class IQL_Calm:
         state_dict["discriminator_optimizer"] = (
             self.discriminator_optimizer.state_dict()
         )
+
+        state_dict["encoder"] = self.encoder.state_dict()
+        state_dict["encoder_optimizer"] = self.encoder_optimizer.state_dict()
+
+        state_dict["torch_rng_state"] = torch.get_rng_state()
+        state_dict["random_rng_state"] = random.getstate()
+        state_dict["numpy_rng_state"] = np.random.get_state()
 
         state_dict.update(extra_state_dict)
         return state_dict

@@ -1,0 +1,12 @@
+# @package _global_
+
+defaults:
+  - /algo: ppo
+  - /env: mimic
+  - /opt/disable_discriminator  # Default mimic experiments don't use the discriminator
+  - /opt/mimic/mlp/target_pose_obs
+  - /opt/mimic/global_tracking
+  - /opt/ase_actor
+  - /opt/mimic/early_termination_tracking_err
+
+experiment_name: ase_mimic

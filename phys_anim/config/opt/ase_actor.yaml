@@ -1,0 +1,42 @@
+# @package _global_
+
+algo:
+  _target_: phys_anim.agents.ase_ppo.ASEPPO
+  config:
+    infomax_parameters:
+        latent_dim: [64]
+    llc:
+      _target_: phys_anim.agents.models.actor.ActorFixedSigma
+      _recursive_: false
+      config:
+        initializer: default
+        checkpoint: results/iql/lightning_logs/version_1/last.ckpt_270
+        mu_model:
+          _target_: phys_anim.agents.models.mlp.MultiHeadedMLP
+          _recursive_: false
+          config:
+            initializer: ${algo.config.actor.config.initializer}
+            units:
+              - 1024
+              - 1024
+              - 512
+            activation: ${algo.config.actor.config.activation}
+            normalize_obs: ${algo.config.normalize_obs}
+            obs_clamp_value: ${algo.config.obs_clamp_value}
+            use_layer_norm: ${algo.config.actor.config.use_layer_norm}
+            terrain_model: ${algo.config.models.terrain_models.mlp}
+            extra_inputs:
+              terrain: ${..terrain_model}
+              latents:
+                _target_: phys_anim.agents.models.common.Flatten
+                config:
+                  normalize_obs: false
+                  obs_clamp_value: ${algo.config.obs_clamp_value}
+                num_in: ${sum:${algo.config.infomax_parameters.latent_dim}}
+                num_out: ${.num_in}
+            latent_dim: ${algo.config.infomax_parameters.latent_dim}
+        init_logstd: -2.9
+        learnable_sigma: false
+        sigma_schedule: null
+        use_layer_norm: false
+        activation: relu
