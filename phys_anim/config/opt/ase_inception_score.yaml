@@ -2,8 +2,8 @@
 
 env:
   config:
-    inception_batch_size: 1024
-    save_file: 'output/inception/iql_ase_1.txt'
+    inception_batch_size: 32
+    save_file: output/inception/scratch_1_60.txt
     classifier:
       config:
         checkpoint: motion_dataset_learning/runs/classifier_training/2025-04-16-20-54-16/classifier.pth

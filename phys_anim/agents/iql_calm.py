@@ -32,6 +32,8 @@ from poselib.core.rotation3d import quat_angle_axis, quat_inverse, quat_mul_norm
 
 from .iql import _local_rotation_to_dof, soft_update_from_to
 
+from tqdm import tqdm
+
 # def list_roll(inlist, n):
 #    for i in range(n):
 #        inlist.append(inlist.pop(0))
@@ -130,15 +132,77 @@ class IQL_Calm:
 
         self.dataset = {}
 
-        self.update_steps_per_stage = 1
+        self.files_envs_batches = []
+        self.batch_count = 0
 
         pass
 
-    def fill_dataset(self):
-        file_rand = random.choice(self.dataset_files)
-        env_rand = random.randint(0, file_rand['global_rot'].shape[1] - 1)
-        global_rot = torch.from_numpy(file_rand['global_rot'][:, env_rand, ...])
-        root_pos = torch.from_numpy(file_rand['root_pos'][:, env_rand, ...])
+    def start_epoch(self):
+        """
+            dataset_envs
+            {
+                0, file0:
+                {
+                    0, env0:
+                    {
+                        batch0:{...}
+                        batch1:{...}
+                    },
+                    1, env1:
+                    {
+                        batch0:{...}
+                        batch1:{...}
+                    }
+                },
+                1, file1:
+                {
+                    0, env0:
+                    {
+                        batch0:{...}
+                        batch1:{...}
+                    },
+                    1, env1:
+                    {
+                        batch0:{...}
+                        batch1:{...}
+                    }
+                }
+            }
+        """
+        self.files_envs_batches = []
+        self.batch_count = 0
+        for file_id, file in enumerate(self.dataset_files):
+            env_batches = []
+            for env_id in range(min(file['dones'].shape[1], self.config.num_env_import)):
+                batch_count = math.ceil(file['dones'][:, env_id].shape[0] / self.config.batch_size)
+                self.batch_count += batch_count
+                env_batches.append((env_id, list(range(batch_count))))
+            self.files_envs_batches.append((file_id, env_batches))
+
+    def fill_batch(self):
+
+        if len(self.files_envs_batches) == 0:
+            return None
+
+        batch = {}
+
+        file_tuple = random.choice(self.files_envs_batches)
+        file_rand = self.dataset_files[file_tuple[0]]
+        env_rand_tuple = random.choice(file_tuple[1])
+        env_rand = env_rand_tuple[0]
+        batch_rand = random.choice(env_rand_tuple[1])
+
+        env_rand_tuple[1].remove(batch_rand)
+        if len(env_rand_tuple[1]) == 0:
+            file_tuple[1].remove(env_rand_tuple)
+            if len(file_tuple[1]) == 0:
+                self.files_envs_batches.remove(file_tuple)
+
+        batch_start = batch_rand * self.config.batch_size
+        batch_end = min(batch_start + self.config.batch_size, file_rand['dones'].shape[0])
+        indices = np.arange(batch_start, batch_end)
+        global_rot = torch.from_numpy(file_rand['global_rot'][indices, env_rand, ...])
+        root_pos = torch.from_numpy(file_rand['root_pos'][indices, env_rand, ...])
         sk_state = SkeletonState.from_rotation_and_root_translation(
             self.skeleton_tree,
             global_rot,
@@ -156,10 +220,10 @@ class IQL_Calm:
                                          device=self.device,
                                          local_rot=sk_motion.local_rotation,
                                          joint_3d_format='exp_map', ).to(self.device)
-        dof_vel = torch.from_numpy(file_rand['dof_vel'][:, env_rand, ...]).to(self.device)
+        dof_vel = torch.from_numpy(file_rand['dof_vel'][indices, env_rand, ...]).to(self.device)
         key_body_pos = sk_motion.global_translation[:, self.key_body_ids].to(self.device)
-        actions = torch.from_numpy(file_rand['actions'][:, env_rand, ...]).to(self.device)
-        self.dataset['disc_obs'] = self.make_disc_with_hist_obs(build_disc_observations(
+        actions = torch.from_numpy(file_rand['actions'][indices, env_rand, ...]).to(self.device)
+        disc_obs = build_disc_observations(
             root_pos,
             root_rot,
             root_vel,
@@ -174,8 +238,9 @@ class IQL_Calm:
             self.dof_offsets,
             False,
             self.w_last,
-        ))
-        self.dataset['human_obs'] = compute_humanoid_observations_max(
+        )
+        batch['disc_obs'] = self.make_with_hist_obs(disc_obs)
+        human_obs = compute_humanoid_observations_max(
             sk_motion.global_translation.to(self.device),
             sk_motion.global_rotation.to(self.device),
             sk_motion.global_velocity.to(self.device),
@@ -185,12 +250,18 @@ class IQL_Calm:
             self.all_config.env.config.humanoid_obs.root_height_obs,
             self.w_last,
         )
-        self.dataset['actions'] = actions
-        self.dataset['dones'] = torch.from_numpy(file_rand['dones'][:, env_rand, ...]).to(self.device)
+        batch['human_obs'] = human_obs
+        batch['actions'] = actions
+        batch['dones'] = torch.from_numpy(file_rand['dones'][indices, env_rand, ...]).to(self.device)
+        batch['next_human_obs'] = torch.roll(human_obs, shifts=-1, dims=0)
 
-    def dataset_roll(self):
-        for key in self.dataset.keys():
-            self.dataset[key] = torch.roll(self.dataset[key], shifts=-self.config.batch_size)
+        for key in batch.keys():
+            batch[key] = batch[key][torch.randperm(batch[key].shape[0])]
+
+        batch['latents'] = self.sample_latents(batch['dones'].shape[0]).detach()
+        batch['next_latents'] = torch.roll(batch["latents"], shifts=-1, dims=0)
+
+        return batch
 
     def setup(self):
         actor: PPO_Actor = instantiate(
@@ -272,14 +343,13 @@ class IQL_Calm:
         )
         encoder_optimizer = instantiate(
             self.config.discriminator_optimizer,
-            params=discriminator.parameters(),
+            params=encoder.parameters(),
         )
 
         self.encoder, self.encoder_optimizer = self.fabric.setup(
             encoder, encoder_optimizer
         )
 
-        self._n_train_steps_total = 0
         self.q_update_period = 1
         self.policy_update_period = 1
         self.target_update_period = 1
@@ -289,154 +359,146 @@ class IQL_Calm:
         #self.save(name="last_a.ckpt")
 
     def fit(self):
+        start_epoch = self.current_epoch
 
-        for self.current_epoch in range(self.config.max_epochs):
+        for self.current_epoch in range(start_epoch, self.config.max_epochs):
             print(f"Epoch: {self.current_epoch}")
-            batch_count = math.ceil(self.dataset_len / self.config.batch_size)
 
-            self.fill_dataset()
-            self.dataset["latents"] = self.sample_latents(self.dataset_len)
+            self.start_epoch()
 
-            print(f'Value Step')
+            p_bar = tqdm(range(self.batch_count))
 
-            v_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
-            q_loss_tensor = torch.zeros(self.update_steps_per_stage * batch_count)
-            desciptor_r = torch.zeros(self.update_steps_per_stage * batch_count)
-            a_loss_tensor_adw_exp = torch.zeros(self.update_steps_per_stage * batch_count)
-            a_loss_tensor_adw_neglog = torch.zeros(self.update_steps_per_stage * batch_count)
-            a_loss_tensor_adw = torch.zeros(self.update_steps_per_stage * batch_count)
-            enc_loss_log = torch.zeros(self.update_steps_per_stage * batch_count)
-            disc_loss_log = torch.zeros(self.update_steps_per_stage * batch_count)
-            for i in range(self.update_steps_per_stage):
-                for batch_id in range(batch_count):
+            v_loss_tensor = torch.zeros(self.batch_count)
+            q_loss_tensor = torch.zeros(self.batch_count)
+            desciptor_r = torch.zeros(self.batch_count)
+            a_loss_tensor_adw_exp = torch.zeros(self.batch_count)
+            a_loss_tensor_adw_neglog = torch.zeros(self.batch_count)
+            a_loss_tensor_adw = torch.zeros(self.batch_count)
+            enc_loss_log = torch.zeros(self.batch_count)
+            disc_loss_log = torch.zeros(self.batch_count)
 
-                    self.dataset_roll()
+            batch_id = 0
+            while (batch := self.fill_batch()) is not None:
 
-                    batch = {
-                        "latents": self.dataset["latents"][0:self.config.batch_size].detach(),
-                        "disc_obs": self.dataset["disc_obs"][0:self.config.batch_size],
-                        "human_obs": self.dataset["human_obs"][0:self.config.batch_size],
-                        "actions": self.dataset["actions"][0:self.config.batch_size],
-                        "dones": self.dataset["dones"][0:self.config.batch_size],
-                    }
+                desc_r = self.calculate_discriminator_reward({"obs": batch["disc_obs"],
+                                                              "latents": batch["latents"]}).squeeze()
 
-                    next_obs = torch.roll(batch["human_obs"], shifts=-1, dims=0)
-                    next_latents = torch.roll(batch["latents"], shifts=-1, dims=0)
+                p_bar.update(1)
+                p_bar.refresh()
 
-                    desc_r = self.calculate_discriminator_reward({"obs": batch["disc_obs"],
-                                                                  "latents": batch["latents"]}).squeeze()
+                reward = desc_r.detach()
 
-                    reward = desc_r.detach()
+                """
+                QF Loss
+                """
+                #print("Q step")
+                q1_pred = self.qf1({"obs": batch["human_obs"], "actions": batch["actions"],
+                     "latents": batch["latents"]})
+                q2_pred = self.qf2({"obs": batch["human_obs"], "actions": batch["actions"],
+                     "latents": batch["latents"]})
+                target_vf_pred = self.vf({"obs": batch["next_human_obs"], "latents": batch['next_latents']}).detach()
 
-                    desciptor_r[batch_id * self.update_steps_per_stage + i] = desc_r.mean().detach()
+                q_target = reward + (1. - batch['dones']) * self.discount * target_vf_pred
+                q_target = q_target.detach()
+                qf1_loss = self.qf_criterion(q1_pred, q_target)
+                qf2_loss = self.qf_criterion(q2_pred, q_target)
 
-                    """
-                    QF Loss
-                    """
-                    q1_pred = self.qf1({"obs": batch["human_obs"], "actions": batch["actions"],
-                         "latents": batch["latents"]})
-                    q2_pred = self.qf2({"obs": batch["human_obs"], "actions": batch["actions"],
-                         "latents": batch["latents"]})
-                    target_vf_pred = self.vf({"obs": next_obs, "latents": next_latents}).detach()
+                """
+                VF Loss
+                """
+                #print("V step")
+                q_pred = torch.min(
+                    self.target_qf1({"obs": batch["human_obs"], "actions": batch["actions"],
+                     "latents": batch["latents"]}),
+                    self.target_qf2({"obs": batch["human_obs"], "actions": batch["actions"],
+                     "latents": batch["latents"]}),
+                ).detach()
+                vf_pred = self.vf({"obs": batch["human_obs"], "latents": batch["latents"]})
+                vf_err = vf_pred - q_pred
+                vf_sign = (vf_err > 0).float()
+                vf_weight = (1 - vf_sign) * self.expectile + vf_sign * (1 - self.expectile)
+                vf_loss = (vf_weight * (vf_err ** 2)).mean()
 
-                    q_target = reward + (1. - batch['dones']) * self.discount * target_vf_pred
-                    q_target = q_target.detach()
-                    qf1_loss = self.qf_criterion(q1_pred, q_target)
-                    qf2_loss = self.qf_criterion(q2_pred, q_target)
+                """
+                Policy Loss
+                """
+                #print("P step")
+                self.actor.training = True
+                actor_out = self.actor.training_forward(
+                    {"obs": batch["human_obs"],
+                     "actions": batch["actions"],
+                     "latents": batch["latents"]})
 
-                    """
-                    VF Loss
-                    """
-                    q_pred = torch.min(
-                        self.target_qf1({"obs": batch["human_obs"], "actions": batch["actions"],
-                         "latents": batch["latents"]}),
-                        self.target_qf2({"obs": batch["human_obs"], "actions": batch["actions"],
-                         "latents": batch["latents"]}),
-                    ).detach()
-                    vf_pred = self.vf({"obs": batch["human_obs"], "latents": batch["latents"]})
-                    vf_err = vf_pred - q_pred
-                    vf_sign = (vf_err > 0).float()
-                    vf_weight = (1 - vf_sign) * self.expectile + vf_sign * (1 - self.expectile)
-                    vf_loss = (vf_weight * (vf_err ** 2)).mean()
+                policy_logpp = -actor_out["neglogp"]
 
-                    """
-                    Policy Loss
-                    """
-                    self.actor.training = True
-                    actor_out = self.actor.training_forward(
-                        {"obs": batch["human_obs"],
-                         "actions": batch["actions"],
-                         "latents": batch["latents"]})
+                adv = q_pred - vf_pred
+                exp_adv = torch.exp(adv / self.beta)
+                exp_adv = torch.clamp(exp_adv, max=100)
 
-                    policy_logpp = -actor_out["neglogp"]
+                weights = exp_adv.detach()  # exp_adv[:, 0].detach()
+                actor_adw_loss = (-policy_logpp * weights).mean()
 
-                    adv = q_pred - vf_pred
-                    exp_adv = torch.exp(adv / self.beta)
-                    exp_adv = torch.clamp(exp_adv, max=100)
+                enc_loss = self.enc_reg_loss(self.config.batch_size)
 
-                    weights = exp_adv.detach()  # exp_adv[:, 0].detach()
-                    actor_adw_loss = (-policy_logpp * weights).mean()
+                disc_loss = self.conditional_disc_loss(
+                    {"obs": batch["disc_obs"], "latents": batch["latents"]})
 
-                    enc_loss = self.enc_reg_loss(self.config.batch_size)
+                aed_loss = actor_adw_loss + enc_loss + disc_loss
 
-                    disc_loss = self.conditional_disc_loss(
-                        {"obs": batch["disc_obs"], "latents": batch["latents"].detach()})
+                """
+                Update networks
+                """
+                if batch_id % self.q_update_period == 0:
+                    self.qf1_optimizer.zero_grad()
+                    qf1_loss.backward()
+                    self.qf1_optimizer.step()
 
-                    aed_loss = actor_adw_loss + enc_loss + disc_loss
+                    self.qf2_optimizer.zero_grad()
+                    qf2_loss.backward()
+                    self.qf2_optimizer.step()
 
-                    """
-                                        Update networks
-                                        """
-                    if self._n_train_steps_total % self.q_update_period == 0:
-                        self.qf1_optimizer.zero_grad()
-                        qf1_loss.backward()
-                        self.qf1_optimizer.step()
+                    self.vf_optimizer.zero_grad()
+                    vf_loss.backward()
+                    self.vf_optimizer.step()
 
-                        self.qf2_optimizer.zero_grad()
-                        qf2_loss.backward()
-                        self.qf2_optimizer.step()
+                if batch_id % self.policy_update_period == 0:
+                    self.actor_optimizer.zero_grad()
+                    self.encoder_optimizer.zero_grad()
+                    self.discriminator_optimizer.zero_grad()
+                    aed_loss.backward()
+                    self.actor_optimizer.step()
+                    self.encoder_optimizer.step()
+                    self.discriminator_optimizer.step()
 
-                        self.vf_optimizer.zero_grad()
-                        vf_loss.backward()
-                        self.vf_optimizer.step()
+                """
+                Soft Updates
+                """
+                if batch_id % self.target_update_period == 0:
+                    soft_update_from_to(
+                        self.qf1, self.target_qf1, self.alpha
+                    )
+                    soft_update_from_to(
+                        self.qf2, self.target_qf2, self.alpha
+                    )
 
-                    if self._n_train_steps_total % self.policy_update_period == 0:
-                        self.actor_optimizer.zero_grad()
-                        self.encoder_optimizer.zero_grad()
-                        self.discriminator_optimizer.zero_grad()
-                        aed_loss.backward()
-                        self.actor_optimizer.step()
-                        self.encoder_optimizer.step()
-                        self.discriminator_optimizer.step()
+                """
+                Log
+                """
+                desciptor_r[batch_id] = desc_r.mean().detach()
 
-                    """
-                    Soft Updates
-                    """
-                    if self._n_train_steps_total % self.target_update_period == 0:
-                        soft_update_from_to(
-                            self.qf1, self.target_qf1, self.alpha
-                        )
-                        soft_update_from_to(
-                            self.qf2, self.target_qf2, self.alpha
-                        )
+                desciptor_r[batch_id] = desc_r.mean().detach()
 
-                    self._n_train_steps_total += 1
+                q_loss_tensor[batch_id] = (qf1_loss.mean().detach() + qf2_loss.mean().detach()) / 2.
 
-                    """
-                    Log
-                    """
-                    desciptor_r[batch_id * self.update_steps_per_stage + i] = desc_r.mean().detach()
+                v_loss_tensor[batch_id] = vf_loss.mean().detach()
 
-                    q_loss_tensor[batch_id * self.update_steps_per_stage + i] = (qf1_loss.mean().detach() + qf2_loss.mean().detach()) / 2.
+                a_loss_tensor_adw[batch_id] = actor_adw_loss.mean().detach()
+                enc_loss_log[batch_id] = enc_loss.mean().detach()
+                disc_loss_log[batch_id] = disc_loss.mean().detach()
+                a_loss_tensor_adw_exp[batch_id] = exp_adv.mean().detach()
+                a_loss_tensor_adw_neglog[batch_id] = actor_out["neglogp"].mean().detach()
 
-                    v_loss_tensor[batch_id * self.update_steps_per_stage + i] = vf_loss.mean().detach()
-
-                    a_loss_tensor_adw[batch_id * self.update_steps_per_stage + i] = actor_adw_loss.mean().detach()
-                    enc_loss_log[batch_id * self.update_steps_per_stage + i] = enc_loss.mean().detach()
-                    disc_loss_log[batch_id * self.update_steps_per_stage + i] = disc_loss.mean().detach()
-                    a_loss_tensor_adw_exp[batch_id * self.update_steps_per_stage + i] = exp_adv.mean().detach()
-                    a_loss_tensor_adw_neglog[batch_id * self.update_steps_per_stage + i] = actor_out[
-                        "neglogp"].mean().detach()
+                batch_id += 1
 
             self.log_dict.update({
                 "reward/desc": desciptor_r.mean(),
@@ -451,8 +513,10 @@ class IQL_Calm:
 
             self.fabric.log_dict(self.log_dict, self.current_epoch)
 
-            if self.current_epoch % 10 == 0:
+            if self.current_epoch % 30 == 0:
                 self.save()
+
+            del p_bar
 
     # todo: make faster
     def sample_latents(self, n):
@@ -472,28 +536,35 @@ class IQL_Calm:
 
         return latents
 
-    def make_disc_with_hist_obs(self, dics_obs: torch.Tensor, reset: torch.Tensor = None):
-        disc_steps_len = dics_obs.shape[0]
+    def make_with_hist_obs(self, obs: torch.Tensor, flatten = True):
+        """
+        Constructs a tensor containing historical observations for each time step.
+
+        Args:
+            obs (torch.Tensor): Tensor of shape (N_steps, ...).
+            reset (torch.Tensor, optional): Unused in current logic.
+
+        Returns:
+            torch.Tensor: Tensor of shape (N_steps, hist_steps, ...) with historical context,
+                          or (N_steps, hist_steps * prod(obs.shape[1:])) if flattened.
+        """
+        N_steps = obs.shape[0]
         hist_steps = self.all_config.env.config.discriminator_obs_historical_steps
-        obs_size = self.discriminator_obs_size_per_step
+        obs_shape = obs.shape[1:]
 
-        padding = torch.zeros((hist_steps - 1, obs_size), device=self.device)
-        padded_obs = torch.cat([padding, dics_obs], dim=0)
+        # Padding with zeros in time dimension
+        padding = torch.zeros((hist_steps - 1, *obs_shape), device=obs.device, dtype=obs.dtype)
+        padded_obs = torch.cat([padding, obs], dim=0)  # Shape: (N_steps + hist_steps - 1, ...)
 
-        temp = torch.zeros((dics_obs.shape[0],
-                            self.all_config.env.config.discriminator_obs_historical_steps,
-                            self.discriminator_obs_size_per_step),
-                           device=self.device)
+        # Create indices to extract historical windows
+        indices = (torch.arange(N_steps, device=obs.device).unsqueeze(1) +
+                   torch.arange(hist_steps, device=obs.device).flip(0))  # Shape: (N_steps, hist_steps)
 
-        # for i in range(0, disc_steps_len):
-        #    for j in range(self.all_config.env.config.discriminator_obs_historical_steps):
-        #            temp[i, j] = padded_obs[i - j + hist_steps - 1]
+        # Gather the slices
+        temp = padded_obs[indices]  # Shape: (N_steps, hist_steps, ...)
 
-        indices = (torch.arange(disc_steps_len, device=self.device).unsqueeze(1) +
-                   torch.arange(hist_steps, device=self.device).flip(0))
-        temp = padded_obs[indices]
-
-        return temp.reshape(disc_steps_len, -1)
+        # Flatten the last two dimensions if needed
+        return temp.reshape(N_steps, -1) if flatten else temp  # Or return `temp` directly if not flattening
 
     def sample_enc_demo_obs(self, n):
         motion_ids = np.random.choice(np.array(list(self.demo_data.keys())), n)
@@ -697,6 +768,7 @@ class IQL_Calm:
         root_dir = Path.cwd() / Path(self.fabric.loggers[0].root_dir)
         save_dir = Path.cwd() / Path(path)
         state_dict = self.get_state_dict({})
+        name = f"{name}_{self.current_epoch}"
         self.fabric.save(save_dir / name, state_dict)
 
     @staticmethod

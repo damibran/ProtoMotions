@@ -225,7 +225,7 @@ def compute_humanoid_observations(
     return obs
 
 
-#@torch.jit.script
+@torch.jit.script
 def compute_humanoid_observations_max(
     body_pos: Tensor,
     body_rot: Tensor,

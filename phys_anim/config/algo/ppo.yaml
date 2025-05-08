@@ -79,7 +79,7 @@ algo:
     task_reward_w: 1.0
     num_mini_epochs: 6
     gradient_accumulation_steps: 1
-    max_eval_steps: 18432 # null
+    max_eval_steps: 5120 # null
     eval_metrics_every: 10000000
     eval_metric_keys: [ ]
     training_early_termination: null

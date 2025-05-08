@@ -180,7 +180,7 @@ algo:
     expectile: 0.7
     alpha: 1
     batch_size: 16384
-    max_epochs: 28000
+    max_epochs: 271
     normalize_obs: True
     obs_clamp_value: null
     discriminator_reward_w: 2.0
@@ -189,6 +189,7 @@ algo:
     discriminator_logit_weight_decay: 0.01
     discount: 0.99
     beta: 3 # aka temperatue
+    num_env_import: 2
 
     eval_callbacks: null
 

@@ -167,6 +167,7 @@ class PPO:
 
         self.episode_reward_meter = AverageMeter(1, 100).to(self.device)
         self.episode_length_meter = AverageMeter(1, 100).to(self.device)
+        self.eval_episode_meter = AverageMeter(1, self.config.max_eval_steps).to(self.device)
         self.episode_env_tensors = TensorAverageMeterDict()
         self.step_count = 0
         self.current_epoch = 0
@@ -527,6 +528,22 @@ class PPO:
         return actor_state
 
     def post_eval_env_step(self, actor_state):
+        self.current_rewards += actor_state["rewards"]
+        self.current_lengths += 1
+
+        done_indices = actor_state["done_indices"]
+
+        self.episode_reward_meter.update(self.current_rewards[done_indices])
+        self.episode_length_meter.update(self.current_lengths[done_indices])
+        self.eval_episode_meter.update(self.current_lengths[done_indices])
+
+        not_dones = 1.0 - actor_state["dones"].float()
+
+        self.current_rewards = self.current_rewards * not_dones
+        self.current_lengths = self.current_lengths * not_dones
+
+        self.episode_env_tensors.add(actor_state["extras"]["to_log"])
+
         for c in self.eval_callbacks:
             actor_state = c.on_post_eval_env_step(actor_state)
         return actor_state
@@ -929,6 +946,9 @@ class PPO:
         self.create_eval_callbacks()
         self.pre_evaluate_policy()
 
+        #all_mjpe_results = []
+        #mjpe_results = []
+
         actor_state = self.create_actor_state()
         step = 0
         games_count = 0
@@ -956,10 +976,26 @@ class PPO:
 
             actor_state = self.post_eval_env_step(actor_state)
 
+            #mjpe_results.append(actor_state["extras"]["to_log"]["gt_err_mean"].cpu().numpy())
+            #if actor_state["dones"].any():
+            #    all_mjpe_results.append(mjpe_results)
+            #    mjpe_results = []
+
             games_count += len(done_indices)
             step += 1
 
         self.env.post_evaluate()
+
+        print(f'AverageEpisodeLen: {self.eval_episode_meter.get_mean().item()}')
+
+        # Compute mean MJPE per step across episodes
+        #max_len = max(len(x) for x in all_mjpe_results)
+        #mjpe_padded = np.array([
+        #    np.pad(m, (0, max_len - len(m)), mode='constant', constant_values=np.nan)
+        #    for m in all_mjpe_results
+        #])
+        #mjpe_mean = np.nanmean(mjpe_padded, axis=0)
+        #np.save("mjpe/online.npy", mjpe_mean)
 
         self.post_evaluate_policy()
 

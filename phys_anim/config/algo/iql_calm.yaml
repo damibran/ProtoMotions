@@ -4,18 +4,19 @@ algo:
   config:
 
     dataset_files:
-      - output/recordings/mimic_train/RL_Avatar_Atk_2xCombo01_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_Atk_Kick_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_Atk_ShieldSwipe01_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_Counter_Atk03_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_Idle_Ready_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_RunBackward_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_RunForward_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_RunLeft_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_RunRight_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_TurnLeft180_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_TurnRight90_Motion/dataset.hdf5
-      - output/recordings/mimic_train/RL_Avatar_TurnRight180_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_Atk_2xCombo01_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_Atk_Kick_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_Atk_ShieldSwipe01_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_Counter_Atk03_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_Idle_Ready_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_RunBackward_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_RunForward_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_RunLeft_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_RunRight_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_TurnLeft90_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_TurnLeft180_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_TurnRight90_Motion/dataset.hdf5
+      - output/recordings/mimic_train_iql/RL_Avatar_TurnRight180_Motion/dataset.hdf5
 
     demo_dataset: output/recordings/IQL_seconddataset/sword_shield_state_action_reduce.yaml
 
@@ -173,18 +174,19 @@ algo:
       latent_steps_max: 150
 
     #IQL parameters
-    expectile: 0.9
-    alpha: 0.5
+    expectile: 0.7
+    alpha: 1
     batch_size: 4096
-    max_epochs: 180
+    max_epochs: 271
     normalize_obs: True
     obs_clamp_value: null
     discriminator_reward_w: 2.0
     discriminator_grad_penalty: 5
     discriminator_weight_decay: 0.0001
     discriminator_logit_weight_decay: 0.01
-    discount: 0.9
+    discount: 0.99
     beta: 3 # aka temperatue
+    num_env_import: 1
 
     eval_callbacks: null
 

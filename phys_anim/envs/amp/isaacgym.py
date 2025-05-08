@@ -61,21 +61,22 @@ class DiscActionHumanoid(DiscHumanoid):  # type: ignore[misc]
 
     def post_physics_step(self):
         super().post_physics_step()
-        if len(self.preds_batch) < self.config.inception_batch_size:
-            logits = self.classifier({'obs': self.extras["disc_obs"]})
-            preds = torch.nn.functional.softmax(logits, dim=-1)
-            self.preds_batch.append(preds)
-        else:
-            preds_batch_stack = torch.stack(self.preds_batch, dim=0)
-            is_score = calculate_inception_score(preds_batch_stack)
-            self.inception_results.append(is_score)
-            self.preds_batch = []
+        if self.config.get('classifier', None) is not None:
+            if len(self.preds_batch) < self.config.inception_batch_size:
+                logits = self.classifier({'obs': self.extras["disc_obs"]})
+                preds = torch.nn.functional.softmax(logits, dim=-1)
+                self.preds_batch.append(preds)
+            else:
+                preds_batch_stack = torch.cat(self.preds_batch, dim=0)
+                is_score = calculate_inception_score(preds_batch_stack)
+                self.inception_results.append(is_score)
+                self.preds_batch = []
 
     def post_evaluate(self):
-        arr = np.array(self.inception_results)
-        with open(self.config.save_file, 'w') as f:
-            f.write(str(arr.mean().item()))
-        pass
+        if self.config.get('classifier', None) is not None:
+            arr = np.array(self.inception_results)
+            with open(self.config.save_file, 'w') as f:
+                f.write(str(arr.mean().item()))
 
     def reset_disc_hist_ref(self, env_ids, motion_ids, motion_times):
         dt = self.dt
