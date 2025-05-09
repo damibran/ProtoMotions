@@ -7,6 +7,7 @@ from torch import nn as nn
 from torch import Tensor
 from torch.cuda import device
 
+import torch.nn.functional as F
 from isaac_utils import torch_utils
 from lightning.fabric import Fabric
 from utils.motion_lib import MotionLib
@@ -172,8 +173,8 @@ class IQL_Fenc:
         encoder: MLP_WithNorm = instantiate(
             self.config.encoder,
             num_in=self.discriminator_obs_size_per_step
-                   * self.discriminator_obs_historical_steps,
-            num_out=sum(self.config.infomax_parameters.latent_dim)
+                   * 2,
+            num_out=2 * sum(self.config.infomax_parameters.latent_dim)
         )
 
         encoder_optimizer = instantiate(
@@ -189,7 +190,7 @@ class IQL_Fenc:
             self.config.decoder,
             num_in=sum(self.config.infomax_parameters.latent_dim),
             num_out=self.discriminator_obs_size_per_step
-                   * self.discriminator_obs_historical_steps
+                   * 2
         )
 
         decoder_optimizer = instantiate(
@@ -331,8 +332,8 @@ class IQL_Fenc:
         batch['dones'] = torch.from_numpy(file_rand['dones'][indices, env_rand, ...]).to(self.device)
         batch['next_human_obs'] = torch.roll(human_obs, shifts=-1, dims=0)
 
-        batch['future_obs'] = self.make_with_future_obs(disc_obs)
-        batch['latents'] = self.encoder({"obs":batch['future_obs']})
+        batch['future_obs'] = self.make_with_future_obs(disc_obs,hist_steps=2)
+        batch['latents'], batch["mean"], batch["log_var"] = self.enc_sample(batch)
         batch['next_latents'] = torch.roll(batch['latents'], shifts=-1, dims=0)
 
         filled = 0
@@ -440,7 +441,7 @@ class IQL_Fenc:
                 weights = exp_adv.detach()  # exp_adv[:, 0].detach()
                 actor_adw_loss = (-policy_logpp * weights).mean()
 
-                enc_loss = self.enc_step({"future_obs":batch["future_obs"], "latents":batch["latents"]})
+                enc_loss = self.enc_step(batch)
 
                 disc_loss, disc_log_dict = self.discriminator_step({"AgentDiscObs": batch["disc_obs"],
                                                                     "DemoDiscObs": demo_batch["disc_obs"]})
@@ -555,17 +556,6 @@ class IQL_Fenc:
                 self.discriminator_optimizer.step()
 
                 """
-                Soft Updates
-                """
-                if batch_id % self.target_update_period == 0:
-                    soft_update_from_to(
-                        self.qf1, self.target_qf1, self.alpha
-                    )
-                    soft_update_from_to(
-                        self.qf2, self.target_qf2, self.alpha
-                    )
-
-                """
                 Log
                 """
                 disc_loss_log[batch_id] = disc_loss.mean().detach()
@@ -636,14 +626,31 @@ class IQL_Fenc:
         args = {"obs": obs}
         return self.discriminator(args, return_norm_obs=return_norm_obs)
 
+    def enc_sample(self,batch):
+        # Encoder forward pass
+        latent_dist = self.encoder({"obs": batch["future_obs"]})  # Assuming input_obs contains encoder inputs
+
+        # Split into mean and log variance
+        mean, log_var = torch.chunk(latent_dist, 2, dim=-1)
+
+        # Reparameterization trick
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+        z = mean + eps * std
+        z = F.normalize(z, dim=-1)
+        return z, mean, log_var
+
     def enc_step(self, batch):
-        decoded = self.decoder({"obs":batch["latents"]})
-        # Loss for uniform distribution over the sphere
-        def uniform_loss(x, t=2):
-            return torch.pdist(x, p=2).pow(2).mul(-t).exp().mean().log()
+        # Decoder forward pass
+        decoded = self.decoder({"obs": batch["latents"]})
+
+        # Calculate losses
         mse_loss = self.enc_loss_fn(decoded, batch["future_obs"])
-        uniform_l = ((batch["latents"].norm(dim=1) - 1)**2).mean()
-        return mse_loss + uniform_l
+
+        # KL divergence loss
+        kl_loss = -0.5 * torch.sum(1 + batch["log_var"] - batch["mean"].pow(2) - batch["log_var"].exp(), dim=1).mean()
+
+        return mse_loss + kl_loss
 
     # batch:{
     #   "AgentDiscObs"
@@ -772,7 +779,7 @@ class IQL_Fenc:
         return temp.reshape(N_steps, -1) if flatten else temp  # Or return `temp` directly if not flattening
 
     # TODO:
-    def make_with_future_obs(self, obs: torch.Tensor, flatten=True):
+    def make_with_future_obs(self, obs: torch.Tensor, flatten=True, hist_steps=None):
         """
         Constructs a tensor containing future observations for each time step.
 
@@ -784,7 +791,8 @@ class IQL_Fenc:
                           or (N_steps, hist_steps * prod(obs.shape[1:])) if flattened.
         """
         N_steps = obs.shape[0]
-        hist_steps = self.all_config.env.config.discriminator_obs_historical_steps
+        if hist_steps is None:
+            hist_steps = self.all_config.env.config.discriminator_obs_historical_steps
         obs_shape = obs.shape[1:]
 
         # Pad at the end with zeros to allow future windowing beyond final step
@@ -892,6 +900,7 @@ class IQL_Fenc:
             print(f"Loading encoder model from checkpoint: {checkpoint}")
             state_dict = torch.load(checkpoint, map_location=self.device)
             self.encoder.load_state_dict(state_dict["encoder"])
+            self.encoder_optimizer.load_state_dict(state_dict["encoder_optimizer"])
 
     def load_discriminator(self, checkpoint):
         if checkpoint is not None:
@@ -899,6 +908,7 @@ class IQL_Fenc:
             print(f"Loading encoder model from checkpoint: {checkpoint}")
             state_dict = torch.load(checkpoint, map_location=self.device)
             self.discriminator.load_state_dict(state_dict["discriminator"])
+            self.discriminator_optimizer.load_state_dict(state_dict["discriminator_optimizer"])
 
     @staticmethod
     def disc_loss_neg(disc_logits) -> Tensor:

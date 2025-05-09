@@ -57,7 +57,7 @@ class ASEPPO(PPO):
 
     def env_step(self, actor_state):
         actor_state["latents"] = actor_state["actions"]
-        actions = self.llc.eval_forward(actor_state)["actions"]
+        actions = self.llc.eval_forward(actor_state)["mus"]
         obs, rewards, dones, extras = self.env.step(actions)
         rewards = rewards * self.task_reward_w
         actor_state.update(
