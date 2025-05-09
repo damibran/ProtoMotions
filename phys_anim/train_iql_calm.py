@@ -94,6 +94,9 @@ def main(config: OmegaConf):
             config.checkpoint = latest_checkpoint
     #algo.load(config.checkpoint)
 
+    algo.load_encoder(config.encoder_checkpoint)
+    algo.load_discriminator(config.discriminator_checkpoint)
+
     save_dir = Path(fabric.loggers[0].log_dir)
     save_dir.mkdir(exist_ok=True, parents=True)
     print(f"Saving config file to {save_dir}")
@@ -101,6 +104,8 @@ def main(config: OmegaConf):
         OmegaConf.save(unresolved_conf, file)
 
     algo.fit()
+    #algo.fit_encoder()
+    #algo.fit_discriminator()
 
 
 if __name__ == "__main__":

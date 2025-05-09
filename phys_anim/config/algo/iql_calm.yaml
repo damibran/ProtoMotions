@@ -1,5 +1,8 @@
 # @package _global_
 
+encoder_checkpoint: results/iql_calm/lightning_logs/encoder/last.ckpt
+discriminator_checkpoint: results/iql_calm/lightning_logs/discriminator/last.ckpt
+
 algo:
   config:
 

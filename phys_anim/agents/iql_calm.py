@@ -518,6 +518,70 @@ class IQL_Calm:
 
             del p_bar
 
+    def fit_encoder(self):
+        start_epoch = self.current_epoch
+
+        for self.current_epoch in range(start_epoch, self.config.max_epochs):
+            print(f"Epoch: {self.current_epoch}")
+
+            enc_loss = self.enc_reg_loss(self.config.batch_size)
+
+            self.encoder_optimizer.zero_grad()
+            enc_loss.backward()
+            self.encoder_optimizer.step()
+
+            self.log_dict.update({
+                "enc_loss": enc_loss.mean(),
+            })
+
+            self.fabric.log_dict(self.log_dict, self.current_epoch)
+
+            self.save()
+
+    def fit_discriminator(self):
+        start_epoch = self.current_epoch
+
+        for self.current_epoch in range(start_epoch, self.config.max_epochs):
+            print(f"Epoch: {self.current_epoch}")
+
+            self.start_epoch()
+
+            p_bar = tqdm(range(self.batch_count))
+
+            disc_loss_log = torch.zeros(self.batch_count)
+
+            batch_id = 0
+            while (batch := self.fill_batch()) is not None:
+
+                p_bar.update(1)
+                p_bar.refresh()
+
+                disc_loss = self.conditional_disc_loss(
+                    {"obs": batch["disc_obs"], "latents": batch["latents"]})
+
+                if batch_id % self.policy_update_period == 0:
+                    self.discriminator_optimizer.zero_grad()
+                    disc_loss.backward()
+                    self.discriminator_optimizer.step()
+
+                """
+                Log
+                """
+                disc_loss_log[batch_id] = disc_loss.mean().detach()
+
+                batch_id += 1
+
+            self.log_dict.update({
+                "actor_loss/disc_loss": disc_loss_log.mean(),
+            })
+
+            self.fabric.log_dict(self.log_dict, self.current_epoch)
+
+            if self.current_epoch % 30 == 0:
+                self.save()
+
+            del p_bar
+
     # todo: make faster
     def sample_latents(self, n):
 
@@ -781,8 +845,22 @@ class IQL_Calm:
         root_dir = Path.cwd() / Path(self.fabric.loggers[0].root_dir)
         save_dir = Path.cwd() / Path(path)
         state_dict = self.get_state_dict({})
-        name = f"{name}_{self.current_epoch}"
+        #name = f"{name}_{self.current_epoch}"
         self.fabric.save(save_dir / name, state_dict)
+
+    def load_encoder(self, checkpoint):
+        if checkpoint is not None:
+            checkpoint = Path(checkpoint).resolve()
+            print(f"Loading encoder model from checkpoint: {checkpoint}")
+            state_dict = torch.load(checkpoint, map_location=self.device)
+            self.encoder.load_state_dict(state_dict["encoder"])
+
+    def load_discriminator(self, checkpoint):
+        if checkpoint is not None:
+            checkpoint = Path(checkpoint).resolve()
+            print(f"Loading encoder model from checkpoint: {checkpoint}")
+            state_dict = torch.load(checkpoint, map_location=self.device)
+            self.discriminator.load_state_dict(state_dict["discriminator"])
 
     @staticmethod
     def disc_loss_neg(disc_logits) -> Tensor:
