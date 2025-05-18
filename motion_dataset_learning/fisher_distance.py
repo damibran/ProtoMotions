@@ -2,10 +2,12 @@ import os
 
 from omegaconf import OmegaConf
 from phys_anim.agents.models.infomax import JointDiscWithMutualInformationEncMLP
+from phys_anim.agents.models.mlp import MLP_WithNorm
 from phys_anim.utils.StateActionLib import StateActionLib
 from poselib.skeleton.skeleton3d import SkeletonMotion
-from phys_anim.envs.humanoid.humanoid_utils import build_disc_action_observations
+from phys_anim.envs.humanoid.humanoid_utils import build_disc_action_observations, build_disc_observations
 import torch
+from torch.functional import F
 
 
 config = OmegaConf.load('motion_dataset_learning/config/fisher_distance.yaml')
@@ -14,11 +16,21 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 num_disc_hist_step = config.discriminator.config.discriminator_obs_historical_steps
 
-encoder = JointDiscWithMutualInformationEncMLP(config.discriminator.config,
-                                               num_in = config.discriminator_obs_size_per_step * num_disc_hist_step)
+# ase encoder
+#encoder = JointDiscWithMutualInformationEncMLP(config.discriminator.config,
+#                                               num_in = config.discriminator_obs_size_per_step * num_disc_hist_step)
 
+# calm encoder
+#encoder = MLP_WithNorm(config.encoder.config, num_in=config.discriminator_obs_size_per_step * num_disc_hist_step,
+#                       num_out=sum(config.discriminator.config.latent_dim))
 
-encoder.load_state_dict(torch.load(config.discriminator.config.checkpoint)["discriminator"])
+# fenc encoder
+encoder = MLP_WithNorm(config.encoder.config, num_in=config.discriminator_obs_size_per_step * num_disc_hist_step,
+                       num_out=2 * sum(config.discriminator.config.latent_dim))
+
+# ase encoder
+#encoder.load_state_dict(torch.load(config.discriminator.config.checkpoint)["discriminator"])
+encoder.load_state_dict(torch.load(config.discriminator.config.checkpoint)["encoder"])
 encoder.to(device)
 
 dof_body_ids = config.robot.dfs_dof_body_ids
@@ -72,6 +84,17 @@ def get_motions_sum_encoder_distance(motion_id, other_motion_id):
             state.action,
             True, True, config.robot.dof_obs_size, dof_offsets, False, True
         )
+        #obs = build_disc_observations(
+        #   state.root_pos,
+        #   state.root_rot,
+        #   state.root_vel,
+        #   state.root_ang_vel,
+        #   state.dof_pos,
+        #   state.dof_vel,
+        #   state.key_body_pos,
+        #   torch.zeros(1, device=device),
+        #   True, True, config.robot.dof_obs_size, dof_offsets, False, True
+        #)
         obs_list_1.append(obs.flatten())
 
     # Build all observation tensors for other_motion_id
@@ -90,14 +113,33 @@ def get_motions_sum_encoder_distance(motion_id, other_motion_id):
             state.action,
             True, True, config.robot.dof_obs_size, dof_offsets, False, True
         )
+        #obs = build_disc_observations(
+        #    state.root_pos,
+        #    state.root_rot,
+        #    state.root_vel,
+        #    state.root_ang_vel,
+        #    state.dof_pos,
+        #    state.dof_vel,
+        #    state.key_body_pos,
+        #    torch.zeros(1, device=device),
+        #    True, True, config.robot.dof_obs_size, dof_offsets, False, True
+        #)
         obs_list_2.append(obs.flatten())
 
     # Stack and encode all observations
     obs_tensor_1 = torch.stack(obs_list_1)  # Shape: [N1, D]
     obs_tensor_2 = torch.stack(obs_list_2)  # Shape: [N2, D]
 
-    z1 = encoder({'obs': obs_tensor_1}, return_enc=True)  # Shape: [N1, E]
-    z2 = encoder({'obs': obs_tensor_2}, return_enc=True)  # Shape: [N2, E]
+    #z1 = encoder({'obs': obs_tensor_1})  # Shape: [N1, E]
+    #z2 = encoder({'obs': obs_tensor_2})  # Shape: [N2, E]
+
+    latent_dist1 = encoder({'obs': obs_tensor_1})
+    mean1, log_var1 = torch.chunk(latent_dist1, 2, dim=-1)
+    latent_dist2 = encoder({'obs': obs_tensor_2})
+    mean2, log_var2 = torch.chunk(latent_dist2, 2, dim=-1)
+
+    z1 = F.normalize(mean1, dim=-1)
+    z2 = F.normalize(mean2, dim=-1)
 
     # Compute all pairwise distances
     # z1: [N1, E], z2: [N2, E]

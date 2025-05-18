@@ -1,15 +1,15 @@
-discriminator_obs_size_per_step: 206
+discriminator_obs_size_per_step: 206 # calm (state only) - 128
 motion_file: output/recordings/IQL_seconddataset/sword_shield_state_action_reduce.yaml
-save_file_path: motion_dataset_learning/fisher_distance_result/scratch_1_60.txt
+save_file_path: motion_dataset_learning/fisher_distance_result/iql_fenc.txt
 discriminator:
   config:
-    checkpoint: results/ase/lightning_logs/version_4/last.ckpt
+    checkpoint: results/iql_fenc/lightning_logs/version_9_a_e_join_loss_2_step_no_disc_pretrain/last.ckpt_90
     initializer: default
     units:
     - 1024
     - 1024
     - 512
-    discriminator_obs_historical_steps: 10
+    discriminator_obs_historical_steps: 2
     activation: relu
     normalize_obs: True
     obs_clamp_value: null
@@ -27,6 +27,19 @@ discriminator:
       latent_dim: [64]
       latent_types: [hypersphere]
     latent_dim: [64]
+
+# calm encoder
+encoder:
+  _target_: phys_anim.agents.models.mlp.MLP_WithNorm
+  _recursive_: false
+  config:
+    initializer: default
+    units: [ 1024, 1024, 512 ]
+    activation: relu
+    normalize_obs: True
+    obs_clamp_value: null
+    use_layer_norm: false
+    extra_inputs: null
 
 robot:
   dof_obs_size: 78

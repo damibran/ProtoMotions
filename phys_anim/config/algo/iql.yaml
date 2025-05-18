@@ -189,7 +189,7 @@ algo:
     discriminator_logit_weight_decay: 0.01
     discount: 0.99
     beta: 3 # aka temperatue
-    num_env_import: 2
+    num_env_import: 1
 
     eval_callbacks: null
 

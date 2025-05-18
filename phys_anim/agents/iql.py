@@ -402,14 +402,18 @@ class IQL:
 
         demo_batch['disc_obs'] = torch.cat(demo_disc_obs, dim=0)
 
-        for key in batch.keys():
-            batch[key] = batch[key][torch.randperm(batch[key].shape[0])]
-
-        for key in demo_batch.keys():
-            demo_batch[key] = demo_batch[key][torch.randperm(demo_batch[key].shape[0])]
-
         batch['latents'] = self.sample_latent(batch['dones'].shape[0])
         batch['next_latents'] = torch.roll(batch["latents"], shifts=-1, dims=0)
+
+        key=list(batch.keys())[0]
+        batch_indices = torch.randperm(batch[key].shape[0])
+        for key in batch.keys():
+            batch[key] = batch[key][batch_indices]
+
+        key=list(demo_batch.keys())[0]
+        demo_indices = torch.randperm(demo_batch[key].shape[0])
+        for key in demo_batch.keys():
+            demo_batch[key] = demo_batch[key][demo_indices]
 
         return batch, demo_batch
 

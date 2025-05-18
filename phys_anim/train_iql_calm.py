@@ -94,8 +94,8 @@ def main(config: OmegaConf):
             config.checkpoint = latest_checkpoint
     #algo.load(config.checkpoint)
 
-    algo.load_encoder(config.encoder_checkpoint)
-    algo.load_discriminator(config.discriminator_checkpoint)
+    algo.load_encoder(config.get("encoder_checkpoint",None))
+    algo.load_discriminator(config.get("discriminator_checkpoint",None))
 
     save_dir = Path(fabric.loggers[0].log_dir)
     save_dir.mkdir(exist_ok=True, parents=True)

@@ -255,8 +255,10 @@ class IQL_Calm:
         batch['dones'] = torch.from_numpy(file_rand['dones'][indices, env_rand, ...]).to(self.device)
         batch['next_human_obs'] = torch.roll(human_obs, shifts=-1, dims=0)
 
+        key = list(batch.keys())[0]
+        batch_indices = torch.randperm(batch[key].shape[0])
         for key in batch.keys():
-            batch[key] = batch[key][torch.randperm(batch[key].shape[0])]
+            batch[key] = batch[key][batch_indices]
 
         batch['latents'] = self.sample_latents(batch['dones'].shape[0]).detach()
         batch['next_latents'] = torch.roll(batch["latents"], shifts=-1, dims=0)
@@ -328,7 +330,7 @@ class IQL_Calm:
         )
         discriminator_optimizer = instantiate(
             self.config.discriminator_optimizer,
-            params=discriminator.parameters(),
+            params=list(discriminator.parameters()),
         )
 
         self.discriminator, self.discriminator_optimizer = self.fabric.setup(
@@ -343,7 +345,7 @@ class IQL_Calm:
         )
         encoder_optimizer = instantiate(
             self.config.discriminator_optimizer,
-            params=encoder.parameters(),
+            params=list(encoder.parameters()),
         )
 
         self.encoder, self.encoder_optimizer = self.fabric.setup(

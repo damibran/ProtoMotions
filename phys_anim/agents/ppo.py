@@ -27,7 +27,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 import numpy as np
 import torch
-
+import random
 from torch import nn, Tensor
 
 import time
@@ -738,6 +738,9 @@ class PPO:
             "episode_length_meter": self.episode_length_meter.state_dict(),
             "best_evaluated_score": self.best_evaluated_score,
         }
+        state_dict["torch_rng_state"] = torch.get_rng_state()
+        state_dict["random_rng_state"] = random.getstate()
+        state_dict["numpy_rng_state"] = np.random.get_state()
         if self.config.actor_lr_scheduler is not None:
             extra_state_dict["actor_lr_scheduler"] = (
                 self.actor_lr_scheduler.state_dict()

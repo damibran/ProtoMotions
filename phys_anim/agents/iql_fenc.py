@@ -60,6 +60,7 @@ class IQL_Fenc:
         )
 
         self.discriminator_obs_historical_steps = self.all_config.env.config.discriminator_obs_historical_steps
+        self.encoder_future_steps = self.all_config.env.config.encoder_future_steps
 
         self.current_epoch = 0
 
@@ -173,7 +174,7 @@ class IQL_Fenc:
         encoder: MLP_WithNorm = instantiate(
             self.config.encoder,
             num_in=self.discriminator_obs_size_per_step
-                   * 2,
+                   * self.encoder_future_steps,
             num_out=2 * sum(self.config.infomax_parameters.latent_dim)
         )
 
@@ -190,7 +191,7 @@ class IQL_Fenc:
             self.config.decoder,
             num_in=sum(self.config.infomax_parameters.latent_dim),
             num_out=self.discriminator_obs_size_per_step
-                   * 2
+                   * self.encoder_future_steps
         )
 
         decoder_optimizer = instantiate(
@@ -332,8 +333,8 @@ class IQL_Fenc:
         batch['dones'] = torch.from_numpy(file_rand['dones'][indices, env_rand, ...]).to(self.device)
         batch['next_human_obs'] = torch.roll(human_obs, shifts=-1, dims=0)
 
-        batch['future_obs'] = self.make_with_future_obs(disc_obs,hist_steps=2)
-        batch['latents'], batch["mean"], batch["log_var"] = self.enc_sample(batch)
+        batch['future_obs'] = self.make_with_future_obs(disc_obs, hist_steps=self.encoder_future_steps)
+        batch['latents'], batch["mean"], batch["log_var"] = self.enc_sample({'future_obs':batch['future_obs']})
         batch['next_latents'] = torch.roll(batch['latents'], shifts=-1, dims=0)
 
         filled = 0
@@ -430,7 +431,7 @@ class IQL_Fenc:
                 actor_out = self.actor.training_forward(
                     {"obs": batch["human_obs"],
                      "actions": batch["actions"],
-                     "latents": batch["latents"].detach()})
+                     "latents": batch["latents"]})
 
                 policy_logpp = -actor_out["neglogp"]
 
@@ -441,10 +442,13 @@ class IQL_Fenc:
                 weights = exp_adv.detach()  # exp_adv[:, 0].detach()
                 actor_adw_loss = (-policy_logpp * weights).mean()
 
-                enc_loss = self.enc_step(batch)
+                enc_loss = self.enc_step({"latents": batch["latents"],"future_obs":batch["future_obs"],
+                                          "log_var":batch["log_var"],"mean":batch["mean"]})
 
                 disc_loss, disc_log_dict = self.discriminator_step({"AgentDiscObs": batch["disc_obs"],
                                                                     "DemoDiscObs": demo_batch["disc_obs"]})
+
+                actor_enc_loss = actor_adw_loss + enc_loss
 
                 """
                 Update networks
@@ -465,12 +469,10 @@ class IQL_Fenc:
                 if batch_id % self.policy_update_period == 0:
 
                     self.actor_optimizer.zero_grad()
-                    actor_adw_loss.backward()
-                    self.actor_optimizer.step()
-
                     self.encoder_optimizer.zero_grad()
                     self.decoder_optimizer.zero_grad()
-                    enc_loss.backward()
+                    actor_enc_loss.backward()
+                    self.actor_optimizer.step()
                     self.encoder_optimizer.step()
                     self.decoder_optimizer.step()
 
@@ -778,7 +780,6 @@ class IQL_Fenc:
         # Flatten the last two dimensions if needed
         return temp.reshape(N_steps, -1) if flatten else temp  # Or return `temp` directly if not flattening
 
-    # TODO:
     def make_with_future_obs(self, obs: torch.Tensor, flatten=True, hist_steps=None):
         """
         Constructs a tensor containing future observations for each time step.
@@ -796,13 +797,12 @@ class IQL_Fenc:
         obs_shape = obs.shape[1:]
 
         # Pad at the end with zeros to allow future windowing beyond final step
-        padding = torch.zeros((hist_steps - 1, *obs_shape), device=obs.device, dtype=obs.dtype)
+        padding = torch.zeros((hist_steps, *obs_shape), device=obs.device, dtype=obs.dtype)
         padded_obs = torch.cat([obs, padding], dim=0)  # Shape: (N_steps + hist_steps - 1, ...)
 
         # Create indices to extract future windows
-        # todo: delte current obs only future
         indices = (torch.arange(N_steps, device=obs.device).unsqueeze(1) +
-                   torch.arange(hist_steps, device=obs.device))  # Shape: (N_steps, hist_steps)
+                   torch.arange(1, hist_steps + 1, device=obs.device))  # Shape: (N_steps, hist_steps)
 
         # Gather the future slices
         temp = padded_obs[indices]  # Shape: (N_steps, hist_steps, ...)
@@ -891,7 +891,7 @@ class IQL_Fenc:
         root_dir = Path.cwd() / Path(self.fabric.loggers[0].root_dir)
         save_dir = Path.cwd() / Path(path)
         state_dict = self.get_state_dict({})
-        #name = f"{name}_{self.current_epoch}"
+        name = f"{name}_{self.current_epoch}"
         self.fabric.save(save_dir / name, state_dict)
 
     def load_encoder(self, checkpoint):
